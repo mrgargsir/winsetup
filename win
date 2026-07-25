@@ -29,8 +29,35 @@ function Show-InstalledSoftware {
     Write-Host "`n[*] Scanning installed software..." -ForegroundColor Cyan
     $paths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*","HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*")
     $software = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.UninstallString } | Select-Object DisplayName, UninstallString, PSChildName | Sort-Object DisplayName -Unique
-    if (-not $software) { [System.Windows.Forms.MessageBox]::Show("No software found.", "Info") | Out-Null; return }
 
+    # 👉 Always-hidden keywords - these never appear in the uninstall picker
+    $hiddenKeywords = @(
+        "application verifier",
+        "autocad",
+        "autodesk",
+        "bently",
+        "staad",
+        "icecap",
+        "java",
+        "microsoft",
+        "pdf24",
+        "security update for microsoft",
+        "vlc",
+        "windows sdk"
+    )
+
+    # 👉 Filter out any DisplayName containing a hidden keyword (case-insensitive)
+    $software = $software | Where-Object {
+        $name = $_.DisplayName
+        $isHidden = $false
+        foreach ($keyword in $hiddenKeywords) {
+            if ($name -match [regex]::Escape($keyword)) { $isHidden = $true; break }
+        }
+        -not $isHidden
+    }
+
+    if (-not $software) { [System.Windows.Forms.MessageBox]::Show("No software found.", "Info") | Out-Null; return }
+    
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Select Software to Uninstall - @MRGARGSIR"
     $form.Size = New-Object System.Drawing.Size(560, 620)
@@ -100,7 +127,7 @@ function Show-InstalledSoftware {
 # ---------------- SECTION 3: STARTUP ITEMS ----------------
 function Disable-StartupItems {
     Write-Host "`n[*] Disabling common startup items..." -ForegroundColor Cyan
-    $targetKeywords = @("anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","edgeupdate","spotify","discord","teams","adobe","acrord32","acrotray","skype","steam","epicgameslauncher","onedrive")
+    $targetKeywords = @("anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","edgeupdate","spotify","discord","teams","adobe","acrord32","acrotray","skype","steam","epicgameslauncher")
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
     foreach ($path in $regPaths) {
         if (Test-Path $path) {
@@ -442,7 +469,7 @@ function Show-MasterMenu {
     # 👉 Select All / Select None buttons
     $btnSelectAll = New-Object System.Windows.Forms.Button
     $btnSelectAll.Text = "Select All"
-    $btnSelectAll.Location = New-Object System.Drawing.Point(10, 480)
+    $btnSelectAll.Location = New-Object System.Drawing.Point(10, 520)
     $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
     $btnSelectAll.Add_Click({
         for ($i = 0; $i -lt $checkList.Items.Count; $i++) {
@@ -454,7 +481,7 @@ function Show-MasterMenu {
 
     $btnSelectNone = New-Object System.Windows.Forms.Button
     $btnSelectNone.Text = "Select None"
-    $btnSelectNone.Location = New-Object System.Drawing.Point(140, 480)
+    $btnSelectNone.Location = New-Object System.Drawing.Point(140, 520)
     $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
     $btnSelectNone.Add_Click({
         for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) }
@@ -464,7 +491,7 @@ function Show-MasterMenu {
     # 👉 Run button
     $btnRun = New-Object System.Windows.Forms.Button
     $btnRun.Text = "Run Selected Tweaks"
-    $btnRun.Location = New-Object System.Drawing.Point(390, 480)
+    $btnRun.Location = New-Object System.Drawing.Point(390, 520)
     $btnRun.Size = New-Object System.Drawing.Size(200, 34)
     $btnRun.BackColor = [System.Drawing.Color]::FromArgb(60,140,60)
     $btnRun.ForeColor = [System.Drawing.Color]::White
@@ -475,7 +502,7 @@ function Show-MasterMenu {
     # 👉 Cancel button
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = "Cancel"
-    $btnCancel.Location = New-Object System.Drawing.Point(390, 520)
+    $btnCancel.Location = New-Object System.Drawing.Point(390, 560)
     $btnCancel.Size = New-Object System.Drawing.Size(200, 30)
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($btnCancel)
