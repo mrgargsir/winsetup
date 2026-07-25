@@ -409,7 +409,7 @@ function Show-MasterMenu {
     # 👉 ---- Build GUI ----
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "MRGARGSIR Windows Setup Utility - @MRGARGSIR"
-    $form.Size = New-Object System.Drawing.Size(620, 680)
+    $form.Size = New-Object System.Drawing.Size(620, 650)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
@@ -425,7 +425,7 @@ function Show-MasterMenu {
 
     $checkList = New-Object System.Windows.Forms.CheckedListBox
     $checkList.Location = New-Object System.Drawing.Point(10, 44)
-    $checkList.Size = New-Object System.Drawing.Size(580, 520)
+    $checkList.Size = New-Object System.Drawing.Size(580, 470)
     $checkList.CheckOnClick = $true
     $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
     $checkList.ForeColor = [System.Drawing.Color]::White
@@ -442,7 +442,7 @@ function Show-MasterMenu {
     # 👉 Select All / Select None buttons
     $btnSelectAll = New-Object System.Windows.Forms.Button
     $btnSelectAll.Text = "Select All"
-    $btnSelectAll.Location = New-Object System.Drawing.Point(10, 572)
+    $btnSelectAll.Location = New-Object System.Drawing.Point(10, 480)
     $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
     $btnSelectAll.Add_Click({
         for ($i = 0; $i -lt $checkList.Items.Count; $i++) {
@@ -454,7 +454,7 @@ function Show-MasterMenu {
 
     $btnSelectNone = New-Object System.Windows.Forms.Button
     $btnSelectNone.Text = "Select None"
-    $btnSelectNone.Location = New-Object System.Drawing.Point(140, 572)
+    $btnSelectNone.Location = New-Object System.Drawing.Point(140, 480)
     $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
     $btnSelectNone.Add_Click({
         for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) }
@@ -464,7 +464,7 @@ function Show-MasterMenu {
     # 👉 Run button
     $btnRun = New-Object System.Windows.Forms.Button
     $btnRun.Text = "Run Selected Tweaks"
-    $btnRun.Location = New-Object System.Drawing.Point(390, 572)
+    $btnRun.Location = New-Object System.Drawing.Point(390, 480)
     $btnRun.Size = New-Object System.Drawing.Size(200, 34)
     $btnRun.BackColor = [System.Drawing.Color]::FromArgb(60,140,60)
     $btnRun.ForeColor = [System.Drawing.Color]::White
@@ -475,7 +475,7 @@ function Show-MasterMenu {
     # 👉 Cancel button
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = "Cancel"
-    $btnCancel.Location = New-Object System.Drawing.Point(390, 612)
+    $btnCancel.Location = New-Object System.Drawing.Point(390, 520)
     $btnCancel.Size = New-Object System.Drawing.Size(200, 30)
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($btnCancel)
