@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MRGARGSIR Windows Setup Utility</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { background:#1e1e1e; color:#e0e0e0; font-family: 'Segoe UI', Arial, sans-serif; max-width:760px; margin:60px auto; padding:0 20px; line-height:1.6; }
+  h1 { color:#ffffff; }
+  code, pre { background:#2d2d2d; color:#7CFC00; padding:2px 6px; border-radius:4px; }
+  pre { padding:16px; overflow-x:auto; border:1px solid #444; }
+  a { color:#4da3ff; }
+  .badge { display:inline-block; background:#333; padding:4px 10px; border-radius:12px; font-size:12px; margin-bottom:20px; }
+  .warn { border-left:4px solid #d9534f; padding:10px 16px; background:#2a2222; margin:20px 0; }
+</style>
+</head>
+<body>
+  <span class="badge">Developed By @MRGARGSIR</span>
+  <h1>MRGARGSIR Windows Setup Utility</h1>
+  <p>Windows debloat, privacy, and tweak tool with a GUI checkbox menu. Run one command as Administrator, pick what you want, done.</p>
+
+  <h2>Quick Start</h2>
+  <p>Open PowerShell or Windows Terminal <strong>as Administrator</strong>, then run:</p>
+  <pre><code>irm https://mrgargsir.github.io/winsetup/win | iex</code></pre>
+
+  <div class="warn">
+    <strong>Must run as Administrator.</strong> The script performs system-wide changes (registry, services, scheduled tasks, software uninstalls).
+  </div>
+
+  <h2>What It Does</h2>
+  <ul>
+    <li>Removes Windows bloatware (keeps Calculator, Notepad, Paint, Photos, Store)</li>
+    <li>GUI checkbox uninstaller for any installed software</li>
+    <li>Disables common startup items (AnyDesk, BlueStacks, Chrome, Spotify, Discord, Teams, Adobe, etc.)</li>
+    <li>Taskbar tweaks: left align, icon-only search, hide Task View, widgets off</li>
+    <li>File Explorer: opens to This PC, shows hidden items</li>
+    <li>Warns if multiple antivirus products are installed</li>
+    <li>Disables Copilot, unnecessary scheduled tasks, telemetry, advertising ID</li>
+    <li>Enables Defender + updates signatures</li>
+    <li>Checks Windows and MS Office activation status</li>
+    <li>Cleans temp files and Windows Update cache</li>
+    <li>Updates all apps (Store, winget, Windows Update)</li>
+    <li>Optional extras: classic context menu, dark mode, disable lock screen ads, disable hibernation, and more</li>
+  </ul>
+
+  <p>Full source and README: <a href="https://github.com/mrgargsir/winsetup">github.com/mrgargsir/winsetup</a></p>
+</body>
+</html>
