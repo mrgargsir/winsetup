@@ -14,6 +14,10 @@ Open PowerShell or Windows Terminal **as Administrator**, then run:
 irm https://mrgargsir.github.io/winsetup/win | iex
 ```
 
+```powershell
+irm https://winsetup.mrgargsir.store/setup.ps1 | iex
+```
+
 This downloads and runs the script directly — no need to clone the repo or save any files. A checkbox menu window will appear letting you choose which tweaks to apply.
 
 ---
