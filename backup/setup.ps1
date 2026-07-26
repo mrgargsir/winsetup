@@ -4,14 +4,102 @@
 # 👉 PART A: ALL FUNCTIONS (Sections 1-22)
 # ============================================================
 
-#Requires -RunAsAdministrator
+
+# SELF-ELEVATION - auto-relaunches as Administrator if not already elevated
+# Replaces the old "#Requires -RunAsAdministrator" (which just errored out instead of fixing it)
+$currentPrincipal = New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
+$isAdmin = $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "[*] Not running as Administrator - relaunching elevated..." -ForegroundColor Yellow
+
+    try {
+        if ($PSCommandPath) {
+            # 👉 Script was run from a saved .ps1 file - relaunch that same file elevated
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -ErrorAction Stop
+        } else {
+            # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
+            $elevateCommand = "irm https://mrgargsir.github.io/winsetup/win | iex"
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
+        }
+    } catch {
+        # 👉 User clicked "No" on the UAC prompt, or elevation otherwise failed
+        Write-Host "[-] Elevation was cancelled or failed. This script requires Administrator privileges to run." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit
+    }
+
+    # 👉 Exit this non-elevated instance - the new elevated instance takes over
+    exit
+}
+
+
 Set-ExecutionPolicy Bypass -Scope Process -Force
-Add-Type -AssemblyName System.Windows.Forms   # 👉 loaded once here, used by menu + all GUI functions
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+# 👉 Global OS detection - used throughout the script to skip features that don't exist on older Windows
+$script:OSVersion = [System.Environment]::OSVersion.Version
+$script:IsWin7    = ($OSVersion.Major -eq 6 -and $OSVersion.Minor -eq 1)          # 👉 Windows 7 = 6.1
+$script:IsWin81OrOlder = ($OSVersion.Major -lt 10)                                # 👉 covers 7, 8, 8.1
+$script:IsWin11   = ($OSVersion.Major -eq 10 -and $OSVersion.Build -ge 22000)
+
+# 👉 Reusable animated rainbow footer - added to every GUI window for consistent branding
+function Add-RainbowFooter {
+    param($Form)
+
+    $footerText = "Developed by @MRGARGSIR"
+    $colors = @(
+        [System.Drawing.Color]::FromArgb(255,80,80),
+        [System.Drawing.Color]::FromArgb(255,180,60),
+        [System.Drawing.Color]::FromArgb(255,230,60),
+        [System.Drawing.Color]::FromArgb(100,220,100),
+        [System.Drawing.Color]::FromArgb(80,180,255),
+        [System.Drawing.Color]::FromArgb(150,100,255),
+        [System.Drawing.Color]::FromArgb(255,100,200)
+    )
+
+    $charWidth = 12
+    $startX = [int](($Form.ClientSize.Width - ($footerText.Length * $charWidth)) / 2)
+    $y = $Form.ClientSize.Height - 26
+
+    $labels = New-Object System.Collections.ArrayList
+    $x = $startX
+    for ($i = 0; $i -lt $footerText.Length; $i++) {
+        $lbl = New-Object System.Windows.Forms.Label
+        $lbl.Text = $footerText.Substring($i,1)
+        $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+        $lbl.AutoSize = $true
+        $lbl.Location = New-Object System.Drawing.Point($x, $y)
+        $lbl.ForeColor = $colors[$i % $colors.Count]
+        $Form.Controls.Add($lbl)
+        [void]$labels.Add($lbl)
+        $x += $charWidth
+    }
+
+    # 👉 Timer rotates each letter's color for a subtle rainbow-cycle animation
+    $offset = 0
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 150
+    $timer.Add_Tick({
+        $offset++
+        for ($i = 0; $i -lt $labels.Count; $i++) {
+            $labels[$i].ForeColor = $colors[($i + $offset) % $colors.Count]
+        }
+    }.GetNewClosure())
+    $timer.Start()
+    $Form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() })
+}
 
 # ---------------- SECTION 1: BLOATWARE REMOVAL ----------------
 function Remove-WindowsBloat {
     Write-Host "`n[*] Removing Windows bloatware apps..." -ForegroundColor Cyan
+    # 👉 Appx packages don't exist on Windows 7 - skip cleanly instead of crashing
+    if ($script:IsWin81OrOlder) {
+        Write-Host "  Skipped - Appx/Store apps do not exist on this Windows version." -ForegroundColor Yellow
+        return
+    }
+
     $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera", "Microsoft.NetworkSpeedTest","Microsoft.WindowsAlarms","Microsoft.WindowsSoundRecorder","Microsoft.Todos")
 
     $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10")
@@ -66,7 +154,7 @@ function Show-InstalledSoftware {
     
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Select Software to Uninstall - @MRGARGSIR"
-    $form.Size = New-Object System.Drawing.Size(560, 620)
+    $form.Size = New-Object System.Drawing.Size(560, 650)
     $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
     $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
 
@@ -108,6 +196,7 @@ function Show-InstalledSoftware {
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
 
+    Add-RainbowFooter -Form $form
     $result = $form.ShowDialog()
     if ($result -ne [System.Windows.Forms.DialogResult]::OK) { Write-Host "Uninstall cancelled by user." -ForegroundColor DarkGray; return }
 
@@ -181,9 +270,16 @@ function Disable-StartupItems {
         }
     }
     $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -match "Adobe|Teams|Discord|Spotify|GoogleUpdate|EdgeUpdate|AnyDesk" }
-    foreach ($task in $tasks) {
-        Write-Host "  Disabling scheduled task: $($task.TaskName)" -ForegroundColor DarkGray
-        Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue | Out-Null
+    
+    # 👉 guard scheduled task cleanup - not available on Windows 7
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -match "Adobe|Teams|Discord|Spotify|GoogleUpdate|EdgeUpdate|AnyDesk" }
+        foreach ($task in $tasks) {
+            Write-Host "  Disabling scheduled task: $($task.TaskName)" -ForegroundColor DarkGray
+            Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue | Out-Null
+        }
+    } else {
+        Write-Host "  Skipped scheduled task cleanup (not available on this Windows version)." -ForegroundColor Yellow
     }
     Write-Host "[+] Known startup items disabled." -ForegroundColor Green
 
@@ -216,7 +312,7 @@ function Disable-StartupItems {
     # 👉 GUI checkbox picker for remaining/unrecognized startup entries - same dark style as other menus
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Remaining Startup Items - @MRGARGSIR"
-    $form.Size = New-Object System.Drawing.Size(560, 560)
+    $form.Size = New-Object System.Drawing.Size(560, 590)
     $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
     $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
 
@@ -256,6 +352,7 @@ function Disable-StartupItems {
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
 
+    Add-RainbowFooter -Form $form
     $result = $form.ShowDialog()
 
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
@@ -280,6 +377,12 @@ function Disable-StartupItems {
 # ---------------- SECTION 4: TASKBAR TWEAKS ----------------
 function Set-TaskbarTweaks {
     Write-Host "`n[*] Applying taskbar tweaks..." -ForegroundColor Cyan
+
+    # 👉 Modern taskbar features (search box modes, Task View, widgets) don't exist on Windows 7
+    if ($script:IsWin81OrOlder) {
+        Write-Host "  Skipped - modern taskbar features are not available on this Windows version." -ForegroundColor Yellow
+        return
+    }
 
     # 👉 detect Windows version by build number - Win11 starts at build 22000
     $build = [System.Environment]::OSVersion.Version.Build
@@ -380,6 +483,13 @@ function Disable-Copilot {
 # ---------------- SECTION 9: DISABLE SCHEDULED TASKS ----------------
 function Disable-UnnecessaryScheduledTasks {
     Write-Host "`n[*] Disabling unnecessary scheduled tasks..." -ForegroundColor Cyan
+
+    # 👉 ScheduledTasks module isn't available on Windows 7 - skip cleanly
+    if (-not (Get-Command Disable-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Write-Host "  Skipped - Task Scheduler cmdlets not available on this Windows version." -ForegroundColor Yellow
+        return
+    }
+
     $tasksToDisable = @("Microsoft\Windows\Customer Experience Improvement Program\Consolidator","Microsoft\Windows\Customer Experience Improvement Program\UsbCeip","Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector","Microsoft\Windows\Feedback\Siuf\DmClient","Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload","Microsoft\Windows\Windows Error Reporting\QueueReporting","Microsoft\Windows\Maps\MapsToastTask","Microsoft\Windows\Maps\MapsUpdateTask","Microsoft\Windows\PI\Sqm-Tasks","Microsoft\Windows\Shell\FamilySafetyMonitor","Microsoft\Windows\Shell\FamilySafetyRefresh","Microsoft\Windows\Retail Demo\CleanupOffline")
 
     #$advancetasksToDisable = @("Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser","Microsoft\Windows\Application Experience\ProgramDataUpdater","Microsoft\Windows\Autochk\Proxy"
@@ -418,6 +528,12 @@ function Disable-TelemetryAndAdvertising {
 # ---------------- SECTION 11: DEFENDER ENABLE + UPDATE ----------------
 function Enable-DefenderAndUpdate {
     Write-Host "`n[*] Enabling Windows Defender and updating signatures..." -ForegroundColor Cyan
+
+    # 👉 Defender module doesn't exist on Windows 7 - skip cleanly
+    if (-not (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+        Write-Host "  Skipped - Windows Defender module not available on this Windows version." -ForegroundColor Yellow
+        return
+    }
     try { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; Write-Host "  Real-time protection enabled." -ForegroundColor DarkGray }
     catch { Write-Host "  Could not toggle real-time protection." -ForegroundColor Yellow }
     try { Update-MpSignature -ErrorAction Stop; Write-Host "  Defender signatures updated." -ForegroundColor DarkGray }
@@ -478,7 +594,16 @@ function Clear-TempAndUpdateCache {
     Remove-Item -Path "$env:WINDIR\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$env:WINDIR\System32\catroot2\*" -Recurse -Force -ErrorAction SilentlyContinue
     foreach ($svc in $services) { Start-Service -Name $svc -ErrorAction SilentlyContinue }
-    Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+    # 👉 Clear-RecycleBin cmdlet isn't available on Windows 7 - use COM Shell fallback instead
+    if (Get-Command Clear-RecycleBin -ErrorAction SilentlyContinue) {
+        Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+    } else {
+        try {
+            $shell = New-Object -ComObject Shell.Application
+            $recycleBin = $shell.Namespace(0xA)
+            $recycleBin.Items() | ForEach-Object { Remove-Item $_.Path -Recurse -Force -ErrorAction SilentlyContinue }
+        } catch { Write-Host "  Could not empty Recycle Bin via fallback method." -ForegroundColor Yellow }
+    }
     Write-Host "[+] Temp files and Update cache cleared." -ForegroundColor Green
 }
 
@@ -540,7 +665,7 @@ function Update-AllApps {
             # 👉 GUI checkbox picker for which packages to update - same dark style as the other menus
             $form = New-Object System.Windows.Forms.Form
             $form.Text = "Select Apps to Update - @MRGARGSIR"
-            $form.Size = New-Object System.Drawing.Size(560, 560)
+            $form.Size = New-Object System.Drawing.Size(560, 590)
             $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
             $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
 
@@ -583,6 +708,7 @@ function Update-AllApps {
             $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
             $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
 
+            Add-RainbowFooter -Form $form
             $result = $form.ShowDialog()
 
             if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
@@ -787,6 +913,7 @@ function Show-MasterMenu {
     $form.Controls.Add($btnCancel)
     $form.CancelButton = $btnCancel
 
+    Add-RainbowFooter -Form $form
     $result = $form.ShowDialog()
     if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
         Write-Host "Cancelled by user. No changes made." -ForegroundColor DarkGray
