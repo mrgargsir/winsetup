@@ -12,8 +12,9 @@ Add-Type -AssemblyName System.Drawing
 # ---------------- SECTION 1: BLOATWARE REMOVAL ----------------
 function Remove-WindowsBloat {
     Write-Host "`n[*] Removing Windows bloatware apps..." -ForegroundColor Cyan
-    $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera")
-    $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.NetworkSpeedTest","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsAlarms","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.WindowsSoundRecorder","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.Todos","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10")
+    $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera", "Microsoft.NetworkSpeedTest","Microsoft.WindowsAlarms","Microsoft.WindowsSoundRecorder","Microsoft.Todos")
+
+    $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10")
     foreach ($app in $BloatApps) {
         if ($KeepApps -notcontains $app) {
             Write-Host "  Removing $app" -ForegroundColor DarkGray
@@ -43,7 +44,12 @@ function Show-InstalledSoftware {
         "pdf24",
         "security update for microsoft",
         "vlc",
-        "windows sdk"
+        "windows sdk",
+        "windows driver package",
+        "windows driver framework",
+        "c++ redistributable",
+        "visual c++",
+        "visual studio"
     )
 
     # 👉 Filter out any DisplayName containing a hidden keyword (case-insensitive)
@@ -234,7 +240,10 @@ function Disable-Copilot {
 # ---------------- SECTION 9: DISABLE SCHEDULED TASKS ----------------
 function Disable-UnnecessaryScheduledTasks {
     Write-Host "`n[*] Disabling unnecessary scheduled tasks..." -ForegroundColor Cyan
-    $tasksToDisable = @("Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser","Microsoft\Windows\Application Experience\ProgramDataUpdater","Microsoft\Windows\Autochk\Proxy","Microsoft\Windows\Customer Experience Improvement Program\Consolidator","Microsoft\Windows\Customer Experience Improvement Program\UsbCeip","Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector","Microsoft\Windows\Feedback\Siuf\DmClient","Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload","Microsoft\Windows\Windows Error Reporting\QueueReporting","Microsoft\Windows\Maps\MapsToastTask","Microsoft\Windows\Maps\MapsUpdateTask","Microsoft\Windows\PI\Sqm-Tasks","Microsoft\Windows\Shell\FamilySafetyMonitor","Microsoft\Windows\Shell\FamilySafetyRefresh","Microsoft\Windows\Retail Demo\CleanupOffline")
+    $tasksToDisable = @("Microsoft\Windows\Customer Experience Improvement Program\Consolidator","Microsoft\Windows\Customer Experience Improvement Program\UsbCeip","Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector","Microsoft\Windows\Feedback\Siuf\DmClient","Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload","Microsoft\Windows\Windows Error Reporting\QueueReporting","Microsoft\Windows\Maps\MapsToastTask","Microsoft\Windows\Maps\MapsUpdateTask","Microsoft\Windows\PI\Sqm-Tasks","Microsoft\Windows\Shell\FamilySafetyMonitor","Microsoft\Windows\Shell\FamilySafetyRefresh","Microsoft\Windows\Retail Demo\CleanupOffline")
+
+    #$advancetasksToDisable = @("Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser","Microsoft\Windows\Application Experience\ProgramDataUpdater","Microsoft\Windows\Autochk\Proxy"
+
     foreach ($taskPath in $tasksToDisable) {
         $taskName = Split-Path $taskPath -Leaf
         $folder = "\" + (Split-Path $taskPath -Parent).Replace("\", "\") + "\"
@@ -294,7 +303,13 @@ function Test-WindowsActivation {
 # ---------------- SECTION 13: OFFICE ACTIVATION CHECK ----------------
 function Test-OfficeActivation {
     Write-Host "`n[*] Checking Microsoft Office activation status..." -ForegroundColor Cyan
-    $osppPaths = @("$env:ProgramFiles\Microsoft Office\Office16\ospp.vbs","${env:ProgramFiles(x86)}\Microsoft Office\Office16\ospp.vbs")
+    # 👉 Added Click-to-Run "root\Office16" paths - covers Microsoft 365/2019/2021 installs, which the old path missed
+    $osppPaths = @(
+        "$env:ProgramFiles\Microsoft Office\Office16\ospp.vbs",
+        "${env:ProgramFiles(x86)}\Microsoft Office\Office16\ospp.vbs",
+        "$env:ProgramFiles\Microsoft Office\root\Office16\ospp.vbs",
+        "${env:ProgramFiles(x86)}\Microsoft Office\root\Office16\ospp.vbs"
+    )
     $osppScript = $osppPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $osppScript) { Write-Host "  Microsoft Office not found (or ospp.vbs missing)." -ForegroundColor Yellow; return }
     try {
@@ -327,21 +342,137 @@ function Clear-TempAndUpdateCache {
     Write-Host "[+] Temp files and Update cache cleared." -ForegroundColor Green
 }
 
-# ---------------- SECTION 15: UPDATE ALL APPS ----------------
+# ---------------- SECTION 15: UPDATE ALL APPS (REVISED - GUI SELECTION) ----------------
 function Update-AllApps {
-    Write-Host "`n[*] Updating all apps..." -ForegroundColor Cyan
+    Write-Host "`n[*] Checking for app updates..." -ForegroundColor Cyan
+
+    # 👉 Store app scan trigger stays automatic - no per-app choice for Store apps, it's just a background scan flag
     try {
         Get-CimInstance -Namespace "root\cimv2\mdm\dmmap" -ClassName "MDM_EnterpriseModernAppManagement_AppManagement01" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName UpdateScanMethod -ErrorAction SilentlyContinue | Out-Null
     } catch { Write-Host "  Store app scan trigger skipped." -ForegroundColor Yellow }
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "  Running winget upgrade --all..." -ForegroundColor DarkGray
-        winget upgrade --all --silent --accept-package-agreements --accept-source-agreements
-    } else { Write-Host "  winget not found - skipping desktop app updates." -ForegroundColor Yellow }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "  winget not found - skipping desktop app updates." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Checking winget for available updates..." -ForegroundColor DarkGray
+
+        # 👉 Get the list of upgradable packages instead of blindly running --all
+        $raw = winget upgrade --accept-source-agreements | Out-String
+        $lines = $raw -split "`r?`n" | Where-Object { $_.Trim() -ne "" }
+
+        # 👉 Find the header line (starts with "Name") to locate column positions
+        $headerIndex = ($lines | Select-String -Pattern "^Name\s+Id\s+Version").LineNumber
+        $packages = @()
+
+        if ($headerIndex) {
+            $headerLine = $lines[$headerIndex - 1]
+            $idStart = $headerLine.IndexOf("Id")
+            $versionStart = $headerLine.IndexOf("Version")
+
+            for ($i = $headerIndex; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                if ($line -match "^-+$" -or $line -match "upgrades available" -or $line.Trim() -eq "") { continue }
+                if ($line.Length -lt $versionStart) { continue }
+                $name = $line.Substring(0, $idStart).Trim()
+                $id = $line.Substring($idStart, $versionStart - $idStart).Trim()
+                if ($name -and $id) {
+                    $packages += [PSCustomObject]@{ Name = $name; Id = $id }
+                }
+            }
+        }
+
+        # 👉 Always-skipped keywords - these never show up or get updated in the app-update list
+        $skipUpdateKeywords = @("autocad", "autodesk", "bently", "staad")
+
+        # 👉 Filter out any package Name or Id containing a skip keyword (case-insensitive)
+        $packages = $packages | Where-Object {
+            $pkg = $_
+            $isSkipped = $false
+            foreach ($keyword in $skipUpdateKeywords) {
+                if ($pkg.Name -match [regex]::Escape($keyword) -or $pkg.Id -match [regex]::Escape($keyword)) { $isSkipped = $true; break }
+            }
+            -not $isSkipped
+        }
+
+        if ($packages.Count -eq 0) {
+            Write-Host "  No winget updates available (or none detected)." -ForegroundColor Green
+        } else {
+            # 👉 GUI checkbox picker for which packages to update - same dark style as the other menus
+            $form = New-Object System.Windows.Forms.Form
+            $form.Text = "Select Apps to Update - @MRGARGSIR"
+            $form.Size = New-Object System.Drawing.Size(560, 560)
+            $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
+            $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
+
+            $label = New-Object System.Windows.Forms.Label
+            $label.Text = "$($packages.Count) update(s) available. Uncheck any you want to skip:"
+            $label.Location = New-Object System.Drawing.Point(10, 10)
+            $label.AutoSize = $true
+            $form.Controls.Add($label)
+
+            $checkList = New-Object System.Windows.Forms.CheckedListBox
+            $checkList.Location = New-Object System.Drawing.Point(10, 36); $checkList.Size = New-Object System.Drawing.Size(520, 400)
+            $checkList.CheckOnClick = $true; $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+            $checkList.ForeColor = [System.Drawing.Color]::White; $checkList.BorderStyle = "FixedSingle"
+            $form.Controls.Add($checkList)
+
+            # 👉 All updates pre-checked by default; user unchecks the ones to skip
+            foreach ($pkg in $packages) {
+                $index = $checkList.Items.Add("$($pkg.Name)  [$($pkg.Id)]")
+                $checkList.SetItemChecked($index, $true)
+            }
+
+            $btnSelectAll = New-Object System.Windows.Forms.Button
+            $btnSelectAll.Text = "Select All"; $btnSelectAll.Location = New-Object System.Drawing.Point(10, 448); $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
+            $btnSelectAll.Add_Click({ for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $true) } })
+            $form.Controls.Add($btnSelectAll)
+
+            $btnSelectNone = New-Object System.Windows.Forms.Button
+            $btnSelectNone.Text = "Select None"; $btnSelectNone.Location = New-Object System.Drawing.Point(140, 448); $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
+            $btnSelectNone.Add_Click({ for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) } })
+            $form.Controls.Add($btnSelectNone)
+
+            $btnUpdate = New-Object System.Windows.Forms.Button
+            $btnUpdate.Text = "Update Selected"; $btnUpdate.Location = New-Object System.Drawing.Point(340, 448); $btnUpdate.Size = New-Object System.Drawing.Size(190, 34)
+            $btnUpdate.BackColor = [System.Drawing.Color]::FromArgb(60,140,60); $btnUpdate.ForeColor = [System.Drawing.Color]::White
+            $btnUpdate.DialogResult = [System.Windows.Forms.DialogResult]::OK
+            $form.Controls.Add($btnUpdate); $form.AcceptButton = $btnUpdate
+
+            $btnCancel = New-Object System.Windows.Forms.Button
+            $btnCancel.Text = "Skip All"; $btnCancel.Location = New-Object System.Drawing.Point(340, 488); $btnCancel.Size = New-Object System.Drawing.Size(190, 30)
+            $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
+
+            $result = $form.ShowDialog()
+
+            if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+                $checkedIndexes = @()
+                for ($i = 0; $i -lt $checkList.Items.Count; $i++) { if ($checkList.GetItemChecked($i)) { $checkedIndexes += $i } }
+
+                foreach ($i in $checkedIndexes) {
+                    $pkg = $packages[$i]
+                    Write-Host "  Updating: $($pkg.Name)..." -ForegroundColor DarkGray
+                    winget upgrade --id $pkg.Id --silent --accept-package-agreements --accept-source-agreements
+                }
+                Write-Host "[+] Selected app updates complete." -ForegroundColor Green
+            } else {
+                Write-Host "  Skipped all winget updates." -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    # 👉 Windows Update (OS) stays a separate yes/no prompt - different risk profile than app updates
     if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
-        Write-Host "  Running Windows Update..." -ForegroundColor DarkGray
-        Import-Module PSWindowsUpdate
-        Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false
+        $osResult = [System.Windows.Forms.MessageBox]::Show("Install available Windows Updates now?", "Windows Update", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($osResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+            Write-Host "  Running Windows Update..." -ForegroundColor DarkGray
+            Import-Module PSWindowsUpdate
+            Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false
+        } else {
+            Write-Host "  Skipped Windows Update." -ForegroundColor DarkGray
+        }
     } else { Write-Host "  PSWindowsUpdate module not installed - skipping OS update step." -ForegroundColor Yellow }
+
     Write-Host "[+] Update pass complete." -ForegroundColor Green
 }
 
@@ -389,14 +520,14 @@ function Disable-CortanaWebSearch {
 
 # ---------------- SECTION 20: PERFORMANCE VISUALS ----------------
 function Set-PerformanceVisuals {
-    Write-Host "`n[*] Applying performance-focused visual effects..." -ForegroundColor Cyan
+    Write-Host "`n[*] Restoring default visual effects..." -ForegroundColor Cyan
     $vfxPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
     if (-not (Test-Path $vfxPath)) { New-Item -Path $vfxPath -Force | Out-Null }
-    Set-ItemProperty -Path $vfxPath -Name "VisualFXSetting" -Value 3 -Type DWord -Force
+    Set-ItemProperty -Path $vfxPath -Name "VisualFXSetting" -Value 0 -Type DWord -Force   # 👉 0 = "Let Windows choose what's best for my computer" (was 3 = Custom)
     $desktopPath = "HKCU:\Control Panel\Desktop"
-    Set-ItemProperty -Path $desktopPath -Name "DragFullWindows" -Value 0 -Force
-    Set-ItemProperty -Path $desktopPath -Name "MenuShowDelay" -Value 0 -Force
-    Write-Host "[+] Performance visual settings applied." -ForegroundColor Green
+    Set-ItemProperty -Path $desktopPath -Name "DragFullWindows" -Value 1 -Force            # 👉 1 = show full window contents while dragging (was 0 = outline only)
+    Set-ItemProperty -Path $desktopPath -Name "MenuShowDelay" -Value 400 -Force            # 👉 400 = default ~400ms submenu hover delay restored (was 0 = instant)
+    Write-Host "[+] Default visual effects restored." -ForegroundColor Green
 }
 
 
@@ -436,7 +567,7 @@ function Show-MasterMenu {
     # 👉 ---- Build GUI ----
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "MRGARGSIR Windows Setup Utility - @MRGARGSIR"
-    $form.Size = New-Object System.Drawing.Size(620, 650)
+    $form.Size = New-Object System.Drawing.Size(620, 670)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
