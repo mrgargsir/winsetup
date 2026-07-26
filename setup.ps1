@@ -4,7 +4,36 @@
 # 👉 PART A: ALL FUNCTIONS (Sections 1-22)
 # ============================================================
 
-#Requires -RunAsAdministrator
+
+# SELF-ELEVATION - auto-relaunches as Administrator if not already elevated
+# Replaces the old "#Requires -RunAsAdministrator" (which just errored out instead of fixing it)
+$currentPrincipal = New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
+$isAdmin = $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "[*] Not running as Administrator - relaunching elevated..." -ForegroundColor Yellow
+
+    try {
+        if ($PSCommandPath) {
+            # 👉 Script was run from a saved .ps1 file - relaunch that same file elevated
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -ErrorAction Stop
+        } else {
+            # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
+            $elevateCommand = "irm https://mrgargsir.github.io/winsetup/win | iex"
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
+        }
+    } catch {
+        # 👉 User clicked "No" on the UAC prompt, or elevation otherwise failed
+        Write-Host "[-] Elevation was cancelled or failed. This script requires Administrator privileges to run." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit
+    }
+
+    # 👉 Exit this non-elevated instance - the new elevated instance takes over
+    exit
+}
+
+
 Set-ExecutionPolicy Bypass -Scope Process -Force
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -30,7 +59,7 @@ function Add-RainbowFooter {
         [System.Drawing.Color]::FromArgb(255,100,200)
     )
 
-    $charWidth = 9
+    $charWidth = 12
     $startX = [int](($Form.ClientSize.Width - ($footerText.Length * $charWidth)) / 2)
     $y = $Form.ClientSize.Height - 26
 
@@ -812,7 +841,7 @@ function Show-MasterMenu {
     # 👉 ---- Build GUI ----
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "MRGARGSIR Windows Setup Utility - @MRGARGSIR"
-    $form.Size = New-Object System.Drawing.Size(620, 700)
+    $form.Size = New-Object System.Drawing.Size(620, 670)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
