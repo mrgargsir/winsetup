@@ -91,6 +91,51 @@ function Add-RainbowFooter {
     $Form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() }.GetNewClosure()) 
 }
 
+#---------------- SECTION 0: AUTO-PARTITION ----------------
+function New-DataPartitionFromFreeSpace {
+    Write-Host "`nChecking disk layout for auto-partition..." -ForegroundColor Cyan
+    $fixedVolumes = Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' }
+
+    if ($fixedVolumes.Count -eq 1 -and $fixedVolumes.DriveLetter -eq 'C') {
+        $cVolume = Get-Volume -DriveLetter C
+        $freeBytes = $cVolume.SizeRemaining
+        $freeGB = [math]::Round($freeBytes / 1GB, 2)
+
+        # Tiered shrink percentage based on available free space
+        $shrinkPct = 0
+        $tierLabel = ""
+        if ($freeGB -ge 30 -and $freeGB -lt 50) {
+            $shrinkPct = 0.20; $tierLabel = "30-50 GB tier"
+        } elseif ($freeGB -ge 50 -and $freeGB -lt 70) {
+            $shrinkPct = 0.30; $tierLabel = "50-70 GB tier"
+        } elseif ($freeGB -ge 70 -and $freeGB -lt 100) {
+            $shrinkPct = 0.40; $tierLabel = "70-100 GB tier"
+        } elseif ($freeGB -ge 100) {
+            $shrinkPct = 0.50; $tierLabel = "100+ GB tier"
+        }
+
+        if ($shrinkPct -gt 0) {
+            $shrinkBytes = [int64]($freeBytes * $shrinkPct)
+            $shrinkGB = [math]::Round($shrinkBytes / 1GB, 2)
+            Write-Host "Free space: $freeGB GB ($tierLabel). Shrinking C: by $($shrinkPct * 100)% = $shrinkGB GB to create D:..." -ForegroundColor DarkGray
+
+            $partition = Get-Partition -DriveLetter C
+            $newCSize = $partition.Size - $shrinkBytes
+            Resize-Partition -DriveLetter C -Size $newCSize -ErrorAction Stop
+
+            $disk = $partition.DiskNumber
+            $newPartition = New-Partition -DiskNumber $disk -UseMaximumSize -DriveLetter D
+            Format-Volume -Partition $newPartition -FileSystem NTFS -NewFileSystemLabel "Data" -Confirm:$false
+
+            Write-Host "D: drive created successfully ($shrinkGB GB)." -ForegroundColor Green
+        } else {
+            Write-Host "Only $freeGB GB free (need at least 30 GB) - skipping partition." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Multiple partitions already exist or C: not sole volume - skipping." -ForegroundColor Yellow
+    }
+}
+
 # ---------------- SECTION 1: BLOATWARE REMOVAL ----------------
 function Remove-WindowsBloat {
     Write-Host "`n[*] Removing Windows bloatware apps..." -ForegroundColor Cyan
@@ -102,7 +147,8 @@ function Remove-WindowsBloat {
 
     $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera", "Microsoft.NetworkSpeedTest","Microsoft.WindowsAlarms","Microsoft.WindowsSoundRecorder","Microsoft.Todos")
 
-    $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10")
+    $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10","MicrosoftTeams","MSTeams","Microsoft.Teams")
+    
     foreach ($app in $BloatApps) {
         if ($KeepApps -notcontains $app) {
             Write-Host "  Removing $app" -ForegroundColor DarkGray
@@ -113,6 +159,24 @@ function Remove-WindowsBloat {
     Write-Host "[+] Bloatware removal complete." -ForegroundColor Green
 }
 
+#---------------- SECTION 1B: START MENU BLOAT ----------------
+function Clear-StartMenuBloat {
+    Write-Host "`nClearing leftover Start menu bloat..." -ForegroundColor Cyan
+    Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
+    $startBin = "$env:LOCALAPPDATA\Packages\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\LocalState\start2.bin"
+    Remove-Item $startBin -Force -ErrorAction SilentlyContinue
+
+    # Also purge stray shortcuts from common Start Menu folders
+    $bloatNames = "Teams","Xbox","Solitaire","Disney","Spotify","TikTok","Netflix","LinkedIn","Candy Crush"
+    $startPaths = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
+    foreach ($path in $startPaths) {
+        Get-ChildItem $path -Recurse -Include *.lnk -ErrorAction SilentlyContinue |
+            Where-Object { $bloatNames | ForEach-Object { $_.Name -match [regex]::Escape($_) } } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "Start menu bloat cleared." -ForegroundColor Green
+}
+ 
 # ---------------- SECTION 2: SOFTWARE UNINSTALLER (GUI CHECKBOX) ----------------
 function Show-InstalledSoftware {
     Write-Host "`n[*] Scanning installed software..." -ForegroundColor Cyan
@@ -207,6 +271,32 @@ function Show-InstalledSoftware {
         } catch { Write-Host "  Failed: $($target.DisplayName) - $($_.Exception.Message)" -ForegroundColor Red }
     }
     [System.Windows.Forms.MessageBox]::Show("Uninstall process finished. Check console for details.", "Done") | Out-Null
+}
+
+#---------------- SECTION 2b: BROWSER TWEAKS ----------------
+function Set-BrowserTweaks {
+    Write-Host "`nApplying Chrome and Edge policy tweaks..." -ForegroundColor Cyan
+    $chromePath = "HKLM:\Software\Policies\Google\Chrome"
+    $edgePath   = "HKLM:\Software\Policies\Microsoft\Edge"
+    foreach ($p in @($chromePath, $edgePath)) {
+        if (-not (Test-Path $p)) { New-Item -Path $p -Force | Out-Null }
+    }
+
+    # Background running off
+    Set-ItemProperty -Path $chromePath -Name BackgroundModeEnabled -Value 0 -Type DWord -Force
+    Set-ItemProperty -Path $edgePath   -Name BackgroundModeEnabled -Value 0 -Type DWord -Force
+
+    # AI tips / GenAI features off
+    $chromeAi = @{ GenAiDefaultSettings=1; HelpMeWriteSettings=1; TabOrganizerSettings=1; HistorySearchSettings=1; CreateThemesSettings=1; TabCompareSettings=1; AIModeSettings=1 }
+    foreach ($k in $chromeAi.Keys) { Set-ItemProperty -Path $chromePath -Name $k -Value $chromeAi[$k] -Type DWord -Force }
+    Set-ItemProperty -Path $edgePath -Name HubsSidebarEnabled -Value 0 -Type DWord -Force
+    Set-ItemProperty -Path $edgePath -Name CopilotPageContext -Value 0 -Type DWord -Force
+
+    # Bookmark/Favorites bar always shown
+    Set-ItemProperty -Path $chromePath -Name BookmarkBarEnabled -Value 1 -Type DWord -Force
+    Set-ItemProperty -Path $edgePath   -Name FavoritesBarEnabled -Value 1 -Type DWord -Force
+
+    Write-Host "Browser tweaks applied." -ForegroundColor Green
 }
 
 # ---------------- SECTION 3: STARTUP ITEMS ----------------
@@ -834,6 +924,68 @@ function Set-PerformanceVisuals {
     Write-Host "[+] Default visual effects restored." -ForegroundColor Green
 }
 
+#---------------- SECTION 21: PRINT SPOOLER + FONT CACHE ----------------
+function Repair-PrintAndFontCache {
+    Write-Host "`nClearing print spooler and font cache..." -ForegroundColor Cyan
+
+    # 1. Stop dependent services before touching spool folder
+    Stop-Service -Name Spooler -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+
+    # 2. Clear stuck print jobs
+    $spoolPath = "$env:WINDIR\System32\spool\PRINTERS"
+    Remove-Item -Path "$spoolPath\*" -Force -Recurse -ErrorAction SilentlyContinue
+    Write-Host "Stuck print jobs cleared." -ForegroundColor DarkGray
+
+    # 3. Clear corrupted font cache
+    Stop-Service -Name FontCache -Force -ErrorAction SilentlyContinue
+    $fontCachePaths = @(
+        "$env:WINDIR\ServiceProfiles\LocalService\AppData\Local\FontCache",
+        "$env:WINDIR\System32\FNTCACHE.DAT"
+    )
+    foreach ($path in $fontCachePaths) {
+        Remove-Item -Path "$path\*" -Force -Recurse -ErrorAction SilentlyContinue
+        Remove-Item -Path $path -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "Font cache cleared." -ForegroundColor DarkGray
+
+    # 4. Restart services
+    Start-Service -Name FontCache -ErrorAction SilentlyContinue
+    Start-Service -Name Spooler -ErrorAction SilentlyContinue
+    Write-Host "Print spooler and font cache repaired." -ForegroundColor Green
+}
+
+# ---------------- SECTION 22: NETWORK OPTIMIZATIONS ----------------
+function Set-NetworkOptimizations {
+    Write-Host "`nApplying network optimizations..." -ForegroundColor Cyan
+
+    # 1. Disable Network Location Awareness startup delay (Group Policy sync wait)
+    $gpPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
+    if (-not (Test-Path $gpPath)) { New-Item -Path $gpPath -Force | Out-Null }
+    Set-ItemProperty -Path $gpPath -Name "GpNetworkStartTimeoutPolicyValue" -Value 0 -Type DWord -Force
+    Write-Host "NLA/GP network wait timeout disabled." -ForegroundColor DarkGray
+
+    # 2. Set DNS to Cloudflare (primary) + Google (secondary) on active adapters
+    $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+    foreach ($adapter in $adapters) {
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("1.1.1.1","8.8.8.8") -ErrorAction SilentlyContinue
+        Write-Host "DNS set to Cloudflare/Google on $($adapter.Name)." -ForegroundColor DarkGray
+    }
+    ipconfig /flushdns | Out-Null
+
+    # 3. Disable IPv6 if not needed (unbind, don't fully strip stack)
+    $disableIPv6 = $false  # flip to $true if IPv6 should be turned off
+    if ($disableIPv6) {
+        foreach ($adapter in $adapters) {
+            Disable-NetAdapterBinding -Name $adapter.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+        }
+        Write-Host "IPv6 disabled on active adapters." -ForegroundColor DarkGray
+    }
+
+    Write-Host "Network optimizations applied." -ForegroundColor Green
+}
+
+
 
 # ============================================================
 # 👉 MASTER WINDOWS SETUP & CLEANUP SCRIPT
@@ -846,11 +998,14 @@ function Show-MasterMenu {
     # 👉 Task registry: Label shown in GUI -> function to call
     # 👉 "Checked" = pre-ticked by default (your core requested list), rest are optional extras (Part 5)
     $taskList = [ordered]@{
+        "Make Partition" = @{ Fn = "New-DataPartitionFromFreeSpace"; Checked = $true }
         "Remove Windows Bloatware (keep Calculator/Notepad/Paint/Photos/Store)" = @{ Fn = "Remove-WindowsBloat"; Checked = $true }
+        "Remove Start Menu Bloat" = @{ Fn = "Clear-StartMenuBloat"; Checked = $true }
         "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }
         "Taskbar Tweaks (Left align, Search icon-only, Hide Task View, Widgets off)" = @{ Fn = "Set-TaskbarTweaks"; Checked = $true }
         "File Explorer Tweaks (This PC default, Show hidden items)"            = @{ Fn = "Set-ExplorerTweaks"; Checked = $true }
         "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
+        "Browser Tweaks"                          = @{ Fn = "Set-BrowserTweaks"; Checked = $true }
         "Check for Multiple Antivirus (warning prompt)"                        = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
         "Disable Copilot"                                                      = @{ Fn = "Disable-Copilot"; Checked = $true }
         "Disable Unnecessary Scheduled Tasks"                                  = @{ Fn = "Disable-UnnecessaryScheduledTasks"; Checked = $true }
@@ -866,6 +1021,8 @@ function Show-MasterMenu {
         "Enable Dark Mode"                                                     = @{ Fn = "Enable-DarkMode"; Checked = $false }
         "Disable Cortana Web Search Results in Start Menu"                     = @{ Fn = "Disable-CortanaWebSearch"; Checked = $false }
         "Performance-Focused Visual Effects"                                   = @{ Fn = "Set-PerformanceVisuals"; Checked = $false }
+        "Repair Print Spooler & Font Cache"            = @{ Fn = "Repair-PrintAndFontCache"; Checked = $true}
+        "Network Optimizations (NLA delay, DNS, IPv6)" = @{ Fn = "Set-NetworkOptimizations"; Checked = $true }
     }
 
     # 👉 ---- Build GUI ----

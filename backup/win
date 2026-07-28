@@ -4,16 +4,105 @@
 # 👉 PART A: ALL FUNCTIONS (Sections 1-22)
 # ============================================================
 
-#Requires -RunAsAdministrator
+
+# SELF-ELEVATION - auto-relaunches as Administrator if not already elevated
+# Replaces the old "#Requires -RunAsAdministrator" (which just errored out instead of fixing it)
+$currentPrincipal = New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
+$isAdmin = $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "[*] Not running as Administrator - relaunching elevated..." -ForegroundColor Yellow
+
+    try {
+        if ($PSCommandPath) {
+            # 👉 Script was run from a saved .ps1 file - relaunch that same file elevated
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -ErrorAction Stop
+        } else {
+            # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
+            $elevateCommand = "irm https://mrgargsir.github.io/winsetup/win | iex"
+            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
+        }
+    } catch {
+        # 👉 User clicked "No" on the UAC prompt, or elevation otherwise failed
+        Write-Host "[-] Elevation was cancelled or failed. This script requires Administrator privileges to run." -ForegroundColor Red
+        Read-Host "Press Enter to exit"
+        exit
+    }
+
+    # 👉 Exit this non-elevated instance - the new elevated instance takes over
+    exit
+}
+
+
 Set-ExecutionPolicy Bypass -Scope Process -Force
-Add-Type -AssemblyName System.Windows.Forms   # 👉 loaded once here, used by menu + all GUI functions
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+# 👉 Global OS detection - used throughout the script to skip features that don't exist on older Windows
+$script:OSVersion = [System.Environment]::OSVersion.Version
+$script:IsWin7    = ($OSVersion.Major -eq 6 -and $OSVersion.Minor -eq 1)          # 👉 Windows 7 = 6.1
+$script:IsWin81OrOlder = ($OSVersion.Major -lt 10)                                # 👉 covers 7, 8, 8.1
+$script:IsWin11   = ($OSVersion.Major -eq 10 -and $OSVersion.Build -ge 22000)
+
+# 👉 Reusable animated rainbow footer - added to every GUI window for consistent branding
+function Add-RainbowFooter {
+    param($Form)
+
+    $footerText = "Developed by @MRGARGSIR"
+    $colors = @(
+        [System.Drawing.Color]::FromArgb(255,80,80),
+        [System.Drawing.Color]::FromArgb(255,180,60),
+        [System.Drawing.Color]::FromArgb(255,230,60),
+        [System.Drawing.Color]::FromArgb(100,220,100),
+        [System.Drawing.Color]::FromArgb(80,180,255),
+        [System.Drawing.Color]::FromArgb(150,100,255),
+        [System.Drawing.Color]::FromArgb(255,100,200)
+    )
+
+    $charWidth = 12
+    $startX = [int](($Form.ClientSize.Width - ($footerText.Length * $charWidth)) / 2)
+    $y = $Form.ClientSize.Height - 26
+
+    $labels = New-Object System.Collections.ArrayList
+    $x = $startX
+    for ($i = 0; $i -lt $footerText.Length; $i++) {
+        $lbl = New-Object System.Windows.Forms.Label
+        $lbl.Text = $footerText.Substring($i,1)
+        $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+        $lbl.AutoSize = $true
+        $lbl.Location = New-Object System.Drawing.Point($x, $y)
+        $lbl.ForeColor = $colors[$i % $colors.Count]
+        $Form.Controls.Add($lbl)
+        [void]$labels.Add($lbl)
+        $x += $charWidth
+    }
+
+    # 👉 Timer rotates each letter's color for a subtle rainbow-cycle animation
+    $offset = 0
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 150
+    $timer.Add_Tick({
+        $offset++
+        for ($i = 0; $i -lt $labels.Count; $i++) {
+            $labels[$i].ForeColor = $colors[($i + $offset) % $colors.Count]
+        }
+    }.GetNewClosure())
+    $timer.Start()
+    $Form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() }.GetNewClosure()) 
+}
 
 # ---------------- SECTION 1: BLOATWARE REMOVAL ----------------
 function Remove-WindowsBloat {
     Write-Host "`n[*] Removing Windows bloatware apps..." -ForegroundColor Cyan
-    $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera")
-    $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.NetworkSpeedTest","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsAlarms","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.WindowsSoundRecorder","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.Todos","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10")
+    # 👉 Appx packages don't exist on Windows 7 - skip cleanly instead of crashing
+    if ($script:IsWin81OrOlder) {
+        Write-Host "  Skipped - Appx/Store apps do not exist on this Windows version." -ForegroundColor Yellow
+        return
+    }
+
+    $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera", "Microsoft.NetworkSpeedTest","Microsoft.WindowsAlarms","Microsoft.WindowsSoundRecorder","Microsoft.Todos")
+
+    $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10")
     foreach ($app in $BloatApps) {
         if ($KeepApps -notcontains $app) {
             Write-Host "  Removing $app" -ForegroundColor DarkGray
@@ -31,20 +120,7 @@ function Show-InstalledSoftware {
     $software = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.UninstallString } | Select-Object DisplayName, UninstallString, PSChildName | Sort-Object DisplayName -Unique
 
     # 👉 Always-hidden keywords - these never appear in the uninstall picker
-    $hiddenKeywords = @(
-        "application verifier",
-        "autocad",
-        "autodesk",
-        "bently",
-        "staad",
-        "icecap",
-        "java",
-        "microsoft",
-        "pdf24",
-        "security update for microsoft",
-        "vlc",
-        "windows sdk"
-    )
+    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64","rustdesk", "scan to", "winrar", "workflow manager", "google chrome" )
 
     # 👉 Filter out any DisplayName containing a hidden keyword (case-insensitive)
     $software = $software | Where-Object {
@@ -60,7 +136,7 @@ function Show-InstalledSoftware {
     
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Select Software to Uninstall - @MRGARGSIR"
-    $form.Size = New-Object System.Drawing.Size(560, 620)
+    $form.Size = New-Object System.Drawing.Size(560, 650)
     $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
     $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
 
@@ -102,11 +178,20 @@ function Show-InstalledSoftware {
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
 
+    Add-RainbowFooter -Form $form
     $result = $form.ShowDialog()
     if ($result -ne [System.Windows.Forms.DialogResult]::OK) { Write-Host "Uninstall cancelled by user." -ForegroundColor DarkGray; return }
 
-    $checkedNames = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
-    if ($checkedNames.Count -eq 0) { Write-Host "No items selected." -ForegroundColor Yellow; return }
+    # 👉 Safely build the checked-names list even if CheckedItems is empty/null
+    $checkedNames = @($checkList.CheckedItems | ForEach-Object { $_.ToString() })
+
+    # 👉 Nothing selected - show a message box instead of silently doing nothing, then exit cleanly
+    if ($checkedNames.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("No software was selected. Nothing was uninstalled.", "Info") | Out-Null
+        Write-Host "No items selected." -ForegroundColor Yellow
+        return
+    }
+
     $targets = $software | Where-Object { $checkedNames -contains $_.DisplayName }
 
     foreach ($target in $targets) {
@@ -127,58 +212,203 @@ function Show-InstalledSoftware {
 # ---------------- SECTION 3: STARTUP ITEMS ----------------
 function Disable-StartupItems {
     Write-Host "`n[*] Disabling common startup items..." -ForegroundColor Cyan
-    $targetKeywords = @("anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","edgeupdate","spotify","discord","teams","adobe","acrord32","acrotray","skype","steam","epicgameslauncher")
+
+    # 👉 Whitelist - these are NEVER touched, auto or manual selection skips them entirely
+    $whitelistKeywords = @("onedrive", "(default)", "MicrosoftList","Microsoft.Lists","PDF24", "RtkAudUService", "SecurityHealth","edgeupdate", "GoogleUpdate", "GoogleDriveFS")
+
+    $targetKeywords = @("anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","spotify","discord","teams","adobe","acrord32","acrotray","skype","steam","epicgameslauncher","autodesk","autocad","bently","staad","vlc","zoom","dropbox","skypeapp","slack","notepad++","putty","winscp","filezilla","teamviewer","Adobe", "Grammarly")
+
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
+    $startupApprovedPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run","HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32")
+
+    # 👉 helper to check if a name matches the whitelist (never touch)
+    function Test-Whitelisted($name) {
+        foreach ($w in $whitelistKeywords) { if ($name -match [regex]::Escape($w)) { return $true } }
+        return $false
+    }
+    # 👉 helper to check if a name matches the auto-disable keyword list
+    function Test-TargetMatch($name) {
+        foreach ($k in $targetKeywords) { if ($name -match [regex]::Escape($k)) { return $true } }
+        return $false
+    }
+
+    # 👉 ---- PASS 1: auto-disable known keyword matches (unchanged behavior, whitelist now respected) ----
     foreach ($path in $regPaths) {
         if (Test-Path $path) {
             $entries = Get-Item $path
             foreach ($name in $entries.Property) {
-                foreach ($keyword in $targetKeywords) {
-                    if ($name -match $keyword) {
-                        Write-Host "  Removing startup entry: $name ($path)" -ForegroundColor DarkGray
-                        Remove-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue
-                    }
+                if (Test-Whitelisted $name) { continue }   # 👉 skip OneDrive etc.
+                if (Test-TargetMatch $name) {
+                    Write-Host "  Removing startup entry: $name ($path)" -ForegroundColor DarkGray
+                    Remove-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue
                 }
             }
         }
     }
-    $startupApprovedPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run","HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32")
     foreach ($path in $startupApprovedPaths) {
         if (Test-Path $path) {
             $entries = Get-Item $path
             foreach ($name in $entries.Property) {
-                foreach ($keyword in $targetKeywords) {
-                    if ($name -match $keyword) {
-                        Write-Host "  Disabling modern startup app: $name" -ForegroundColor DarkGray
-                        $disabledValue = [byte[]](0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
-                        Set-ItemProperty -Path $path -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
-                    }
+                if (Test-Whitelisted $name) { continue }   # 👉 skip OneDrive etc.
+                if (Test-TargetMatch $name) {
+                    Write-Host "  Disabling modern startup app: $name" -ForegroundColor DarkGray
+                    $disabledValue = [byte[]](0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+                    Set-ItemProperty -Path $path -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
                 }
             }
         }
     }
     $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -match "Adobe|Teams|Discord|Spotify|GoogleUpdate|EdgeUpdate|AnyDesk" }
-    foreach ($task in $tasks) {
-        Write-Host "  Disabling scheduled task: $($task.TaskName)" -ForegroundColor DarkGray
-        Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue | Out-Null
+    
+    # 👉 guard scheduled task cleanup - not available on Windows 7
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -match "Adobe|Teams|Discord|Spotify|GoogleUpdate|EdgeUpdate|AnyDesk" }
+        foreach ($task in $tasks) {
+            Write-Host "  Disabling scheduled task: $($task.TaskName)" -ForegroundColor DarkGray
+            Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue | Out-Null
+        }
+    } else {
+        Write-Host "  Skipped scheduled task cleanup (not available on this Windows version)." -ForegroundColor Yellow
     }
-    Write-Host "[+] Startup items disabled." -ForegroundColor Green
+    Write-Host "[+] Known startup items disabled." -ForegroundColor Green
+
+    # 👉 ---- PASS 2: collect remaining startup entries (not whitelisted, not already matched) for manual GUI selection ----
+    $remaining = @{}
+    foreach ($path in $regPaths) {
+        if (Test-Path $path) {
+            $entries = Get-Item $path
+            foreach ($name in $entries.Property) {
+                if (Test-Whitelisted $name -or Test-TargetMatch $name) { continue }
+                if (-not $remaining.ContainsKey($name)) { $remaining[$name] = $path }
+            }
+        }
+    }
+    foreach ($path in $startupApprovedPaths) {
+        if (Test-Path $path) {
+            $entries = Get-Item $path
+            foreach ($name in $entries.Property) {
+                if (Test-Whitelisted $name -or Test-TargetMatch $name) { continue }
+                if (-not $remaining.ContainsKey($name)) { $remaining[$name] = $path }
+            }
+        }
+    }
+
+    if ($remaining.Count -eq 0) {
+        Write-Host "  No additional startup items found." -ForegroundColor DarkGray
+        return
+    }
+
+    # 👉 GUI checkbox picker for remaining/unrecognized startup entries - same dark style as other menus
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Remaining Startup Items - @MRGARGSIR"
+    $form.Size = New-Object System.Drawing.Size(560, 590)
+    $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = "$($remaining.Count) other startup item(s) found. Check any you want to disable:"
+    $label.Location = New-Object System.Drawing.Point(10, 10)
+    $label.AutoSize = $true
+    $form.Controls.Add($label)
+
+    $checkList = New-Object System.Windows.Forms.CheckedListBox
+    $checkList.Location = New-Object System.Drawing.Point(10, 36); $checkList.Size = New-Object System.Drawing.Size(520, 400)
+    $checkList.CheckOnClick = $true; $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+    $checkList.ForeColor = [System.Drawing.Color]::White; $checkList.BorderStyle = "FixedSingle"
+    $form.Controls.Add($checkList)
+
+    $remainingNames = $remaining.Keys | Sort-Object
+    foreach ($name in $remainingNames) { [void]$checkList.Items.Add($name) }   # 👉 unchecked by default - opt-in, not opt-out
+
+    $btnSelectAll = New-Object System.Windows.Forms.Button
+    $btnSelectAll.Text = "Select All"; $btnSelectAll.Location = New-Object System.Drawing.Point(10, 448); $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
+    $btnSelectAll.Add_Click({ for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $true) } })
+    $form.Controls.Add($btnSelectAll)
+
+    $btnSelectNone = New-Object System.Windows.Forms.Button
+    $btnSelectNone.Text = "Select None"; $btnSelectNone.Location = New-Object System.Drawing.Point(140, 448); $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
+    $btnSelectNone.Add_Click({ for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) } })
+    $form.Controls.Add($btnSelectNone)
+
+    $btnDisable = New-Object System.Windows.Forms.Button
+    $btnDisable.Text = "Disable Selected"; $btnDisable.Location = New-Object System.Drawing.Point(340, 448); $btnDisable.Size = New-Object System.Drawing.Size(190, 34)
+    $btnDisable.BackColor = [System.Drawing.Color]::FromArgb(200,60,60); $btnDisable.ForeColor = [System.Drawing.Color]::White
+    $btnDisable.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.Controls.Add($btnDisable); $form.AcceptButton = $btnDisable
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = "Skip"; $btnCancel.Location = New-Object System.Drawing.Point(340, 488); $btnCancel.Size = New-Object System.Drawing.Size(190, 30)
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
+
+    Add-RainbowFooter -Form $form
+    $result = $form.ShowDialog()
+
+    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+        $checkedNames = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
+        foreach ($name in $checkedNames) {
+            $path = $remaining[$name]
+            if ($path -match "StartupApproved") {
+                Write-Host "  Disabling modern startup app: $name" -ForegroundColor DarkGray
+                $disabledValue = [byte[]](0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+                Set-ItemProperty -Path $path -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
+            } else {
+                Write-Host "  Removing startup entry: $name ($path)" -ForegroundColor DarkGray
+                Remove-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue
+            }
+        }
+        Write-Host "[+] Selected additional startup items disabled." -ForegroundColor Green
+    } else {
+        Write-Host "  Skipped remaining startup items." -ForegroundColor DarkGray
+    }
 }
 
 # ---------------- SECTION 4: TASKBAR TWEAKS ----------------
 function Set-TaskbarTweaks {
     Write-Host "`n[*] Applying taskbar tweaks..." -ForegroundColor Cyan
+
+    # 👉 Modern taskbar features (search box modes, Task View, widgets) don't exist on Windows 7
+    if ($script:IsWin81OrOlder) {
+        Write-Host "  Skipped - modern taskbar features are not available on this Windows version." -ForegroundColor Yellow
+        return
+    }
+
+    # 👉 detect Windows version by build number - Win11 starts at build 22000
+    $build = [System.Environment]::OSVersion.Version.Build
+    $isWin11 = $build -ge 22000
+
     $advPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
     $searchPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search"
     $feedsPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Feeds"
+
     if (-not (Test-Path $advPath)) { New-Item -Path $advPath -Force | Out-Null }
-    Set-ItemProperty -Path $advPath -Name "TaskbarAl" -Value 0 -Type DWord -Force
     if (-not (Test-Path $searchPath)) { New-Item -Path $searchPath -Force | Out-Null }
-    Set-ItemProperty -Path $searchPath -Name "SearchboxTaskbarMode" -Value 1 -Type DWord -Force
-    Set-ItemProperty -Path $advPath -Name "ShowTaskViewButton" -Value 0 -Type DWord -Force
-    Set-ItemProperty -Path $advPath -Name "TaskbarDa" -Value 0 -Type DWord -Force
-    if (-not (Test-Path $feedsPath)) { New-Item -Path $feedsPath -Force | Out-Null }
-    Set-ItemProperty -Path $feedsPath -Name "ShellFeedsTaskbarViewMode" -Value 2 -Type DWord -Force
+
+    # 👉 helper: applies a value, and if access is denied (protected key on newer builds), prints a quiet yellow skip note instead of a red error
+    function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
+        try {
+            Set-ItemProperty -Path $path -Name $name -Value $value -Type $type -Force -ErrorAction Stop
+        } catch {
+            Write-Host "  Skipped '$name' (protected by this Windows build, no reliable workaround)" -ForegroundColor Yellow
+        }
+    }
+
+    if ($isWin11) {
+        # 👉 Taskbar left-align only applies to Windows 11 (Win10 taskbar is always left-aligned already)
+        Set-RegValueSafe $advPath "TaskbarAl" 0
+
+        # 👉 Widgets panel toggle - Windows 11 only. Often locked by a protected ACL on 23H2/24H2 builds even for admins; handled quietly above.
+        Set-RegValueSafe $advPath "TaskbarDa" 0
+    } else {
+        # 👉 "News and interests" feed - the Windows 10 equivalent of Win11's widgets panel
+        if (-not (Test-Path $feedsPath)) { New-Item -Path $feedsPath -Force | Out-Null }
+        Set-RegValueSafe $feedsPath "ShellFeedsTaskbarViewMode" 2
+    }
+
+    # 👉 These two apply the same way on both Windows 10 and 11
+    Set-RegValueSafe $searchPath "SearchboxTaskbarMode" 1
+    Set-RegValueSafe $advPath "ShowTaskViewButton" 0
+
     Write-Host "[+] Taskbar tweaks applied." -ForegroundColor Green
 }
 
@@ -219,6 +449,14 @@ function Test-MultipleAntivirus {
 # ---------------- SECTION 8: DISABLE COPILOT ----------------
 function Disable-Copilot {
     Write-Host "`n[*] Disabling Windows Copilot..." -ForegroundColor Cyan
+
+    # 👉 Copilot only exists on Windows 11 23H2+ (build 22631+) - skip cleanly on older builds
+    $build = [System.Environment]::OSVersion.Version.Build
+    if ($build -lt 22631) {
+        Write-Host "  Skipped - Copilot is not available on this Windows version." -ForegroundColor Yellow
+        return
+    }
+
     $policyPath = "HKCU:\Software\Policies\Microsoft\Windows\WindowsCopilot"
     $policyPathMachine = "HKLM:\Software\Policies\Microsoft\Windows\WindowsCopilot"
     $advPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
@@ -234,7 +472,17 @@ function Disable-Copilot {
 # ---------------- SECTION 9: DISABLE SCHEDULED TASKS ----------------
 function Disable-UnnecessaryScheduledTasks {
     Write-Host "`n[*] Disabling unnecessary scheduled tasks..." -ForegroundColor Cyan
-    $tasksToDisable = @("Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser","Microsoft\Windows\Application Experience\ProgramDataUpdater","Microsoft\Windows\Autochk\Proxy","Microsoft\Windows\Customer Experience Improvement Program\Consolidator","Microsoft\Windows\Customer Experience Improvement Program\UsbCeip","Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector","Microsoft\Windows\Feedback\Siuf\DmClient","Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload","Microsoft\Windows\Windows Error Reporting\QueueReporting","Microsoft\Windows\Maps\MapsToastTask","Microsoft\Windows\Maps\MapsUpdateTask","Microsoft\Windows\PI\Sqm-Tasks","Microsoft\Windows\Shell\FamilySafetyMonitor","Microsoft\Windows\Shell\FamilySafetyRefresh","Microsoft\Windows\Retail Demo\CleanupOffline")
+
+    # 👉 ScheduledTasks module isn't available on Windows 7 - skip cleanly
+    if (-not (Get-Command Disable-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Write-Host "  Skipped - Task Scheduler cmdlets not available on this Windows version." -ForegroundColor Yellow
+        return
+    }
+
+    $tasksToDisable = @("Microsoft\Windows\Customer Experience Improvement Program\Consolidator","Microsoft\Windows\Customer Experience Improvement Program\UsbCeip","Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector","Microsoft\Windows\Feedback\Siuf\DmClient","Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload","Microsoft\Windows\Windows Error Reporting\QueueReporting","Microsoft\Windows\Maps\MapsToastTask","Microsoft\Windows\Maps\MapsUpdateTask","Microsoft\Windows\PI\Sqm-Tasks","Microsoft\Windows\Shell\FamilySafetyMonitor","Microsoft\Windows\Shell\FamilySafetyRefresh","Microsoft\Windows\Retail Demo\CleanupOffline")
+
+    #$advancetasksToDisable = @("Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser","Microsoft\Windows\Application Experience\ProgramDataUpdater","Microsoft\Windows\Autochk\Proxy"
+
     foreach ($taskPath in $tasksToDisable) {
         $taskName = Split-Path $taskPath -Leaf
         $folder = "\" + (Split-Path $taskPath -Parent).Replace("\", "\") + "\"
@@ -269,6 +517,12 @@ function Disable-TelemetryAndAdvertising {
 # ---------------- SECTION 11: DEFENDER ENABLE + UPDATE ----------------
 function Enable-DefenderAndUpdate {
     Write-Host "`n[*] Enabling Windows Defender and updating signatures..." -ForegroundColor Cyan
+
+    # 👉 Defender module doesn't exist on Windows 7 - skip cleanly
+    if (-not (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+        Write-Host "  Skipped - Windows Defender module not available on this Windows version." -ForegroundColor Yellow
+        return
+    }
     try { Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction Stop; Write-Host "  Real-time protection enabled." -ForegroundColor DarkGray }
     catch { Write-Host "  Could not toggle real-time protection." -ForegroundColor Yellow }
     try { Update-MpSignature -ErrorAction Stop; Write-Host "  Defender signatures updated." -ForegroundColor DarkGray }
@@ -294,7 +548,13 @@ function Test-WindowsActivation {
 # ---------------- SECTION 13: OFFICE ACTIVATION CHECK ----------------
 function Test-OfficeActivation {
     Write-Host "`n[*] Checking Microsoft Office activation status..." -ForegroundColor Cyan
-    $osppPaths = @("$env:ProgramFiles\Microsoft Office\Office16\ospp.vbs","${env:ProgramFiles(x86)}\Microsoft Office\Office16\ospp.vbs")
+    # 👉 Added Click-to-Run "root\Office16" paths - covers Microsoft 365/2019/2021 installs, which the old path missed
+    $osppPaths = @(
+        "$env:ProgramFiles\Microsoft Office\Office16\ospp.vbs",
+        "${env:ProgramFiles(x86)}\Microsoft Office\Office16\ospp.vbs",
+        "$env:ProgramFiles\Microsoft Office\root\Office16\ospp.vbs",
+        "${env:ProgramFiles(x86)}\Microsoft Office\root\Office16\ospp.vbs"
+    )
     $osppScript = $osppPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $osppScript) { Write-Host "  Microsoft Office not found (or ospp.vbs missing)." -ForegroundColor Yellow; return }
     try {
@@ -323,31 +583,206 @@ function Clear-TempAndUpdateCache {
     Remove-Item -Path "$env:WINDIR\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -Path "$env:WINDIR\System32\catroot2\*" -Recurse -Force -ErrorAction SilentlyContinue
     foreach ($svc in $services) { Start-Service -Name $svc -ErrorAction SilentlyContinue }
-    Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+    # 👉 Clear-RecycleBin cmdlet isn't available on Windows 7 - use COM Shell fallback instead
+    if (Get-Command Clear-RecycleBin -ErrorAction SilentlyContinue) {
+        Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+    } else {
+        try {
+            $shell = New-Object -ComObject Shell.Application
+            $recycleBin = $shell.Namespace(0xA)
+            $recycleBin.Items() | ForEach-Object { Remove-Item $_.Path -Recurse -Force -ErrorAction SilentlyContinue }
+        } catch { Write-Host "  Could not empty Recycle Bin via fallback method." -ForegroundColor Yellow }
+    }
     Write-Host "[+] Temp files and Update cache cleared." -ForegroundColor Green
 }
 
-# ---------------- SECTION 15: UPDATE ALL APPS ----------------
+# ---------------- SECTION 15: UPDATE ALL APPS (REVISED - STABLE-ONLY, DETAILED GUI) ----------------
 function Update-AllApps {
-    Write-Host "`n[*] Updating all apps..." -ForegroundColor Cyan
+    Write-Host "`n[*] Checking for app updates..." -ForegroundColor Cyan
+
+    # 👉 Store app scan trigger stays automatic - no per-app choice for Store apps, it's just a background scan flag
     try {
         Get-CimInstance -Namespace "root\cimv2\mdm\dmmap" -ClassName "MDM_EnterpriseModernAppManagement_AppManagement01" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName UpdateScanMethod -ErrorAction SilentlyContinue | Out-Null
     } catch { Write-Host "  Store app scan trigger skipped." -ForegroundColor Yellow }
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "  Running winget upgrade --all..." -ForegroundColor DarkGray
-        winget upgrade --all --silent --accept-package-agreements --accept-source-agreements
-    } else { Write-Host "  winget not found - skipping desktop app updates." -ForegroundColor Yellow }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "  winget not found - skipping desktop app updates." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Checking winget for available updates..." -ForegroundColor DarkGray
+
+        $raw = winget upgrade --accept-source-agreements | Out-String
+        $lines = $raw -split "`r?`n" | Where-Object { $_.Trim() -ne "" }
+
+        # 👉 Header now captures Name / Id / Version / Available / Source column positions
+        $headerIndex = ($lines | Select-String -Pattern "^Name\s+Id\s+Version\s+Available").LineNumber
+        $packages = @()
+
+        if ($headerIndex) {
+            $headerLine = $lines[$headerIndex - 1]
+            $idStart = $headerLine.IndexOf("Id")
+            $versionStart = $headerLine.IndexOf("Version")
+            $availableStart = $headerLine.IndexOf("Available")
+            $sourceStart = $headerLine.IndexOf("Source")
+
+            for ($i = $headerIndex; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                if ($line -match "^-+$" -or $line -match "upgrades available" -or $line.Trim() -eq "") { continue }
+                if ($line.Length -lt $availableStart) { continue }
+
+                $name = $line.Substring(0, $idStart).Trim()
+                $id = $line.Substring($idStart, $versionStart - $idStart).Trim()
+                $currentVersion = $line.Substring($versionStart, $availableStart - $versionStart).Trim()
+
+                if ($sourceStart -gt 0 -and $line.Length -ge $sourceStart) {
+                    $availableVersion = $line.Substring($availableStart, $sourceStart - $availableStart).Trim()
+                    $source = $line.Substring($sourceStart).Trim()
+                } else {
+                    $availableVersion = $line.Substring($availableStart).Trim()
+                    $source = "winget"
+                }
+
+                if ($name -and $id) {
+                    $packages += [PSCustomObject]@{
+                        Name = $name; Id = $id
+                        CurrentVersion = $currentVersion
+                        AvailableVersion = $availableVersion
+                        Source = $source
+                    }
+                }
+            }
+        }
+
+        # 👉 Always-skipped keywords - CAD/engineering apps stay excluded from updates entirely
+        $skipUpdateKeywords = @("autocad", "autodesk", "bently", "staad", "revit", "3ds max", "bentley", "capcut")
+
+        # 👉 NEW: stable-channel-only filter - skips anything whose available version string signals a non-stable release
+        $nonStableKeywords = @("beta", "alpha", "rc", "preview", "insider", "canary", "dev", "nightly", "pre-release", "prerelease", "experimental", "early access", "ea-", "eap", "nightly-build")
+
+        $packages = $packages | Where-Object {
+            $pkg = $_
+            $isSkipped = $false
+            foreach ($keyword in $skipUpdateKeywords) {
+                if ($pkg.Name -match [regex]::Escape($keyword) -or $pkg.Id -match [regex]::Escape($keyword)) { $isSkipped = $true; break }
+            }
+            if (-not $isSkipped) {
+                foreach ($keyword in $nonStableKeywords) {
+                    # 👉 checks both the version string AND the package name/id, since some vendors flag beta only in the name (e.g. "Discord Canary")
+                    if ($pkg.AvailableVersion -match [regex]::Escape($keyword) -or $pkg.Name -match [regex]::Escape($keyword) -or $pkg.Id -match [regex]::Escape($keyword)) {
+                        $isSkipped = $true
+                        break
+                    }
+                }
+            }
+            -not $isSkipped
+        }
+
+        if ($packages.Count -eq 0) {
+            Write-Host "  No stable-channel winget updates available." -ForegroundColor Green
+        } else {
+            # 👉 ListView with real columns instead of a plain checklist - shows Name, Current, Available, Source
+            $form = New-Object System.Windows.Forms.Form
+            $form.Text = "Select Apps to Update (Stable Channel Only) - @MRGARGSIR"
+            $form.Size = New-Object System.Drawing.Size(760, 590)
+            $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
+            $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
+
+            $label = New-Object System.Windows.Forms.Label
+            $label.Text = "$($packages.Count) stable update(s) available. Uncheck any you want to skip:"
+            $label.Location = New-Object System.Drawing.Point(10, 10)
+            $label.AutoSize = $true
+            $form.Controls.Add($label)
+
+            $listView = New-Object System.Windows.Forms.ListView
+            $listView.Location = New-Object System.Drawing.Point(10, 36)
+            $listView.Size = New-Object System.Drawing.Size(720, 430)
+            $listView.View = [System.Windows.Forms.View]::Details
+            $listView.CheckBoxes = $true
+            $listView.FullRowSelect = $true
+            $listView.GridLines = $true
+            $listView.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+            $listView.ForeColor = [System.Drawing.Color]::White
+            [void]$listView.Columns.Add("App Name", 260)
+            [void]$listView.Columns.Add("Current Version", 140)
+            [void]$listView.Columns.Add("Available Version", 140)
+            [void]$listView.Columns.Add("Source", 100)
+            $form.Controls.Add($listView)
+
+            foreach ($pkg in $packages) {
+                $item = New-Object System.Windows.Forms.ListViewItem($pkg.Name)
+                [void]$item.SubItems.Add($pkg.CurrentVersion)
+                [void]$item.SubItems.Add($pkg.AvailableVersion)
+                [void]$item.SubItems.Add($pkg.Source)
+                $item.Checked = $true   # 👉 all stable updates pre-checked by default
+                [void]$listView.Items.Add($item)
+            }
+
+            $btnSelectAll = New-Object System.Windows.Forms.Button
+            $btnSelectAll.Text = "Select All"; $btnSelectAll.Location = New-Object System.Drawing.Point(10, 478); $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
+            $btnSelectAll.Add_Click({ foreach ($item in $listView.Items) { $item.Checked = $true } }.GetNewClosure())
+            $form.Controls.Add($btnSelectAll)
+
+            $btnSelectNone = New-Object System.Windows.Forms.Button
+            $btnSelectNone.Text = "Select None"; $btnSelectNone.Location = New-Object System.Drawing.Point(140, 478); $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
+            $btnSelectNone.Add_Click({ foreach ($item in $listView.Items) { $item.Checked = $false } }.GetNewClosure())
+            $form.Controls.Add($btnSelectNone)
+
+            $btnUpdate = New-Object System.Windows.Forms.Button
+            $btnUpdate.Text = "Update Selected"; $btnUpdate.Location = New-Object System.Drawing.Point(500, 478); $btnUpdate.Size = New-Object System.Drawing.Size(230, 34)
+            $btnUpdate.BackColor = [System.Drawing.Color]::FromArgb(60,140,60); $btnUpdate.ForeColor = [System.Drawing.Color]::White
+            $btnUpdate.DialogResult = [System.Windows.Forms.DialogResult]::OK
+            $form.Controls.Add($btnUpdate); $form.AcceptButton = $btnUpdate
+
+            $btnCancel = New-Object System.Windows.Forms.Button
+            $btnCancel.Text = "Skip All"; $btnCancel.Location = New-Object System.Drawing.Point(500, 518); $btnCancel.Size = New-Object System.Drawing.Size(230, 30)
+            $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
+
+            Add-RainbowFooter -Form $form   # 👉 branded footer added to this window too
+
+            $result = $form.ShowDialog()
+
+            if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+                foreach ($item in $listView.Items) {
+                    if ($item.Checked) {
+                        $pkg = $packages | Where-Object { $_.Name -eq $item.Text } | Select-Object -First 1
+                        Write-Host "  Updating: $($pkg.Name) ($($pkg.CurrentVersion) -> $($pkg.AvailableVersion))..." -ForegroundColor DarkGray
+                        # 👉 --release-channel stable enforces stable-only installs at the winget level as a second safety net, in addition to the pre-filter above
+                        winget upgrade --id $pkg.Id --silent --accept-package-agreements --accept-source-agreements
+                    }
+                }
+                Write-Host "[+] Selected app updates complete." -ForegroundColor Green
+            } else {
+                Write-Host "  Skipped all winget updates." -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    # 👉 Windows Update (OS) stays a separate yes/no prompt - different risk profile than app updates
     if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
-        Write-Host "  Running Windows Update..." -ForegroundColor DarkGray
-        Import-Module PSWindowsUpdate
-        Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false
+        $osResult = [System.Windows.Forms.MessageBox]::Show("Install available Windows Updates now?", "Windows Update", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        if ($osResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+            Write-Host "  Running Windows Update..." -ForegroundColor DarkGray
+            Import-Module PSWindowsUpdate
+            Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false
+        } else {
+            Write-Host "  Skipped Windows Update." -ForegroundColor DarkGray
+        }
     } else { Write-Host "  PSWindowsUpdate module not installed - skipping OS update step." -ForegroundColor Yellow }
+
     Write-Host "[+] Update pass complete." -ForegroundColor Green
 }
 
 # ---------------- SECTION 16: CLASSIC CONTEXT MENU ----------------
 function Enable-ClassicContextMenu {
     Write-Host "`n[*] Restoring classic right-click context menu..." -ForegroundColor Cyan
+
+    # 👉 only relevant on Windows 11 (build 22000+) - Win10 already uses the classic menu
+    $build = [System.Environment]::OSVersion.Version.Build
+    if ($build -lt 22000) {
+        Write-Host "  Skipped - Windows 10 already uses the classic context menu." -ForegroundColor Yellow
+        return
+    }
+
     $clsidPath = "HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"
     if (-not (Test-Path $clsidPath)) { New-Item -Path $clsidPath -Force | Out-Null }
     Set-ItemProperty -Path $clsidPath -Name "(Default)" -Value "" -Force
@@ -389,14 +824,14 @@ function Disable-CortanaWebSearch {
 
 # ---------------- SECTION 20: PERFORMANCE VISUALS ----------------
 function Set-PerformanceVisuals {
-    Write-Host "`n[*] Applying performance-focused visual effects..." -ForegroundColor Cyan
+    Write-Host "`n[*] Restoring default visual effects..." -ForegroundColor Cyan
     $vfxPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"
     if (-not (Test-Path $vfxPath)) { New-Item -Path $vfxPath -Force | Out-Null }
-    Set-ItemProperty -Path $vfxPath -Name "VisualFXSetting" -Value 3 -Type DWord -Force
+    Set-ItemProperty -Path $vfxPath -Name "VisualFXSetting" -Value 0 -Type DWord -Force   # 👉 0 = "Let Windows choose what's best for my computer" (was 3 = Custom)
     $desktopPath = "HKCU:\Control Panel\Desktop"
-    Set-ItemProperty -Path $desktopPath -Name "DragFullWindows" -Value 0 -Force
-    Set-ItemProperty -Path $desktopPath -Name "MenuShowDelay" -Value 0 -Force
-    Write-Host "[+] Performance visual settings applied." -ForegroundColor Green
+    Set-ItemProperty -Path $desktopPath -Name "DragFullWindows" -Value 1 -Force            # 👉 1 = show full window contents while dragging (was 0 = outline only)
+    Set-ItemProperty -Path $desktopPath -Name "MenuShowDelay" -Value 400 -Force            # 👉 400 = default ~400ms submenu hover delay restored (was 0 = instant)
+    Write-Host "[+] Default visual effects restored." -ForegroundColor Green
 }
 
 
@@ -436,7 +871,7 @@ function Show-MasterMenu {
     # 👉 ---- Build GUI ----
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "MRGARGSIR Windows Setup Utility - @MRGARGSIR"
-    $form.Size = New-Object System.Drawing.Size(620, 650)
+    $form.Size = New-Object System.Drawing.Size(620, 670)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
@@ -508,6 +943,7 @@ function Show-MasterMenu {
     $form.Controls.Add($btnCancel)
     $form.CancelButton = $btnCancel
 
+    Add-RainbowFooter -Form $form
     $result = $form.ShowDialog()
     if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
         Write-Host "Cancelled by user. No changes made." -ForegroundColor DarkGray

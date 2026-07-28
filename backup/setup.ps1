@@ -88,7 +88,7 @@ function Add-RainbowFooter {
         }
     }.GetNewClosure())
     $timer.Start()
-    $Form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() })
+    $Form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() }.GetNewClosure()) 
 }
 
 # ---------------- SECTION 1: BLOATWARE REMOVAL ----------------
@@ -120,25 +120,7 @@ function Show-InstalledSoftware {
     $software = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.UninstallString } | Select-Object DisplayName, UninstallString, PSChildName | Sort-Object DisplayName -Unique
 
     # 👉 Always-hidden keywords - these never appear in the uninstall picker
-    $hiddenKeywords = @(
-        "application verifier",
-        "autocad",
-        "autodesk",
-        "bently",
-        "staad",
-        "icecap",
-        "java",
-        "microsoft",
-        "pdf24",
-        "security update for microsoft",
-        "vlc",
-        "windows sdk",
-        "windows driver package",
-        "windows driver framework",
-        "c++ redistributable",
-        "visual c++",
-        "visual studio"
-    )
+    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64","rustdesk", "scan to", "winrar", "workflow manager", "google chrome" )
 
     # 👉 Filter out any DisplayName containing a hidden keyword (case-insensitive)
     $software = $software | Where-Object {
@@ -200,8 +182,16 @@ function Show-InstalledSoftware {
     $result = $form.ShowDialog()
     if ($result -ne [System.Windows.Forms.DialogResult]::OK) { Write-Host "Uninstall cancelled by user." -ForegroundColor DarkGray; return }
 
-    $checkedNames = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
-    if ($checkedNames.Count -eq 0) { Write-Host "No items selected." -ForegroundColor Yellow; return }
+    # 👉 Safely build the checked-names list even if CheckedItems is empty/null
+    $checkedNames = @($checkList.CheckedItems | ForEach-Object { $_.ToString() })
+
+    # 👉 Nothing selected - show a message box instead of silently doing nothing, then exit cleanly
+    if ($checkedNames.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("No software was selected. Nothing was uninstalled.", "Info") | Out-Null
+        Write-Host "No items selected." -ForegroundColor Yellow
+        return
+    }
+
     $targets = $software | Where-Object { $checkedNames -contains $_.DisplayName }
 
     foreach ($target in $targets) {
@@ -224,22 +214,21 @@ function Disable-StartupItems {
     Write-Host "`n[*] Disabling common startup items..." -ForegroundColor Cyan
 
     # 👉 Whitelist - these are NEVER touched, auto or manual selection skips them entirely
-    $whitelistKeywords = @("onedrive")
+    $whitelistKeywords = @("onedrive", "(default)", "MicrosoftList","Microsoft.Lists","PDF24", "RtkAudUService", "SecurityHealth","edgeupdate", "GoogleUpdate", "GoogleDriveFS")
 
-    # 👉 removed duplicate "teams" entry that appeared twice in the original list
-    $targetKeywords = @("anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","edgeupdate","spotify","discord","teams","adobe","acrord32","acrotray","skype","steam","epicgameslauncher","autodesk","autocad","bently","staad","vlc","zoom","dropbox","skypeapp","slack","notepad++","putty","winscp","filezilla","teamviewer")
+    $targetKeywords = @("anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","spotify","discord","teams","adobe","acrord32","acrotray","skype","steam","epicgameslauncher","autodesk","autocad","bently","staad","vlc","zoom","dropbox","skypeapp","slack","notepad++","putty","winscp","filezilla","teamviewer","Adobe", "Grammarly")
 
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
     $startupApprovedPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run","HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32")
 
     # 👉 helper to check if a name matches the whitelist (never touch)
     function Test-Whitelisted($name) {
-        foreach ($w in $whitelistKeywords) { if ($name -match $w) { return $true } }
+        foreach ($w in $whitelistKeywords) { if ($name -match [regex]::Escape($w)) { return $true } }
         return $false
     }
     # 👉 helper to check if a name matches the auto-disable keyword list
     function Test-TargetMatch($name) {
-        foreach ($k in $targetKeywords) { if ($name -match $k) { return $true } }
+        foreach ($k in $targetKeywords) { if ($name -match [regex]::Escape($k)) { return $true } }
         return $false
     }
 
@@ -607,7 +596,7 @@ function Clear-TempAndUpdateCache {
     Write-Host "[+] Temp files and Update cache cleared." -ForegroundColor Green
 }
 
-# ---------------- SECTION 15: UPDATE ALL APPS (REVISED - GUI SELECTION) ----------------
+# ---------------- SECTION 15: UPDATE ALL APPS (REVISED - STABLE-ONLY, DETAILED GUI) ----------------
 function Update-AllApps {
     Write-Host "`n[*] Checking for app updates..." -ForegroundColor Cyan
 
@@ -621,104 +610,145 @@ function Update-AllApps {
     } else {
         Write-Host "  Checking winget for available updates..." -ForegroundColor DarkGray
 
-        # 👉 Get the list of upgradable packages instead of blindly running --all
         $raw = winget upgrade --accept-source-agreements | Out-String
         $lines = $raw -split "`r?`n" | Where-Object { $_.Trim() -ne "" }
 
-        # 👉 Find the header line (starts with "Name") to locate column positions
-        $headerIndex = ($lines | Select-String -Pattern "^Name\s+Id\s+Version").LineNumber
+        # 👉 Header now captures Name / Id / Version / Available / Source column positions
+        $headerIndex = ($lines | Select-String -Pattern "^Name\s+Id\s+Version\s+Available").LineNumber
         $packages = @()
 
         if ($headerIndex) {
             $headerLine = $lines[$headerIndex - 1]
             $idStart = $headerLine.IndexOf("Id")
             $versionStart = $headerLine.IndexOf("Version")
+            $availableStart = $headerLine.IndexOf("Available")
+            $sourceStart = $headerLine.IndexOf("Source")
 
             for ($i = $headerIndex; $i -lt $lines.Count; $i++) {
                 $line = $lines[$i]
                 if ($line -match "^-+$" -or $line -match "upgrades available" -or $line.Trim() -eq "") { continue }
-                if ($line.Length -lt $versionStart) { continue }
+                if ($line.Length -lt $availableStart) { continue }
+
                 $name = $line.Substring(0, $idStart).Trim()
                 $id = $line.Substring($idStart, $versionStart - $idStart).Trim()
+                $currentVersion = $line.Substring($versionStart, $availableStart - $versionStart).Trim()
+
+                if ($sourceStart -gt 0 -and $line.Length -ge $sourceStart) {
+                    $availableVersion = $line.Substring($availableStart, $sourceStart - $availableStart).Trim()
+                    $source = $line.Substring($sourceStart).Trim()
+                } else {
+                    $availableVersion = $line.Substring($availableStart).Trim()
+                    $source = "winget"
+                }
+
                 if ($name -and $id) {
-                    $packages += [PSCustomObject]@{ Name = $name; Id = $id }
+                    $packages += [PSCustomObject]@{
+                        Name = $name; Id = $id
+                        CurrentVersion = $currentVersion
+                        AvailableVersion = $availableVersion
+                        Source = $source
+                    }
                 }
             }
         }
 
-        # 👉 Always-skipped keywords - these never show up or get updated in the app-update list
-        $skipUpdateKeywords = @("autocad", "autodesk", "bently", "staad")
+        # 👉 Always-skipped keywords - CAD/engineering apps stay excluded from updates entirely
+        $skipUpdateKeywords = @("autocad", "autodesk", "bently", "staad", "revit", "3ds max", "bentley", "capcut")
 
-        # 👉 Filter out any package Name or Id containing a skip keyword (case-insensitive)
+        # 👉 NEW: stable-channel-only filter - skips anything whose available version string signals a non-stable release
+        $nonStableKeywords = @("beta", "alpha", "rc", "preview", "insider", "canary", "dev", "nightly", "pre-release", "prerelease", "experimental", "early access", "ea-", "eap", "nightly-build")
+
         $packages = $packages | Where-Object {
             $pkg = $_
             $isSkipped = $false
             foreach ($keyword in $skipUpdateKeywords) {
                 if ($pkg.Name -match [regex]::Escape($keyword) -or $pkg.Id -match [regex]::Escape($keyword)) { $isSkipped = $true; break }
             }
+            if (-not $isSkipped) {
+                foreach ($keyword in $nonStableKeywords) {
+                    # 👉 checks both the version string AND the package name/id, since some vendors flag beta only in the name (e.g. "Discord Canary")
+                    if ($pkg.AvailableVersion -match [regex]::Escape($keyword) -or $pkg.Name -match [regex]::Escape($keyword) -or $pkg.Id -match [regex]::Escape($keyword)) {
+                        $isSkipped = $true
+                        break
+                    }
+                }
+            }
             -not $isSkipped
         }
 
         if ($packages.Count -eq 0) {
-            Write-Host "  No winget updates available (or none detected)." -ForegroundColor Green
+            Write-Host "  No stable-channel winget updates available." -ForegroundColor Green
         } else {
-            # 👉 GUI checkbox picker for which packages to update - same dark style as the other menus
+            # 👉 ListView with real columns instead of a plain checklist - shows Name, Current, Available, Source
             $form = New-Object System.Windows.Forms.Form
-            $form.Text = "Select Apps to Update - @MRGARGSIR"
-            $form.Size = New-Object System.Drawing.Size(560, 590)
+            $form.Text = "Select Apps to Update (Stable Channel Only) - @MRGARGSIR"
+            $form.Size = New-Object System.Drawing.Size(760, 590)
             $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
             $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
 
             $label = New-Object System.Windows.Forms.Label
-            $label.Text = "$($packages.Count) update(s) available. Uncheck any you want to skip:"
+            $label.Text = "$($packages.Count) stable update(s) available. Uncheck any you want to skip:"
             $label.Location = New-Object System.Drawing.Point(10, 10)
             $label.AutoSize = $true
             $form.Controls.Add($label)
 
-            $checkList = New-Object System.Windows.Forms.CheckedListBox
-            $checkList.Location = New-Object System.Drawing.Point(10, 36); $checkList.Size = New-Object System.Drawing.Size(520, 400)
-            $checkList.CheckOnClick = $true; $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
-            $checkList.ForeColor = [System.Drawing.Color]::White; $checkList.BorderStyle = "FixedSingle"
-            $form.Controls.Add($checkList)
+            $listView = New-Object System.Windows.Forms.ListView
+            $listView.Location = New-Object System.Drawing.Point(10, 36)
+            $listView.Size = New-Object System.Drawing.Size(720, 430)
+            $listView.View = [System.Windows.Forms.View]::Details
+            $listView.CheckBoxes = $true
+            $listView.FullRowSelect = $true
+            $listView.GridLines = $true
+            $listView.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+            $listView.ForeColor = [System.Drawing.Color]::White
+            [void]$listView.Columns.Add("App Name", 260)
+            [void]$listView.Columns.Add("Current Version", 140)
+            [void]$listView.Columns.Add("Available Version", 140)
+            [void]$listView.Columns.Add("Source", 100)
+            $form.Controls.Add($listView)
 
-            # 👉 All updates pre-checked by default; user unchecks the ones to skip
             foreach ($pkg in $packages) {
-                $index = $checkList.Items.Add("$($pkg.Name)  [$($pkg.Id)]")
-                $checkList.SetItemChecked($index, $true)
+                $item = New-Object System.Windows.Forms.ListViewItem($pkg.Name)
+                [void]$item.SubItems.Add($pkg.CurrentVersion)
+                [void]$item.SubItems.Add($pkg.AvailableVersion)
+                [void]$item.SubItems.Add($pkg.Source)
+                $item.Checked = $true   # 👉 all stable updates pre-checked by default
+                [void]$listView.Items.Add($item)
             }
 
             $btnSelectAll = New-Object System.Windows.Forms.Button
-            $btnSelectAll.Text = "Select All"; $btnSelectAll.Location = New-Object System.Drawing.Point(10, 448); $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
-            $btnSelectAll.Add_Click({ for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $true) } })
+            $btnSelectAll.Text = "Select All"; $btnSelectAll.Location = New-Object System.Drawing.Point(10, 478); $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
+            $btnSelectAll.Add_Click({ foreach ($item in $listView.Items) { $item.Checked = $true } }.GetNewClosure())
             $form.Controls.Add($btnSelectAll)
 
             $btnSelectNone = New-Object System.Windows.Forms.Button
-            $btnSelectNone.Text = "Select None"; $btnSelectNone.Location = New-Object System.Drawing.Point(140, 448); $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
-            $btnSelectNone.Add_Click({ for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) } })
+            $btnSelectNone.Text = "Select None"; $btnSelectNone.Location = New-Object System.Drawing.Point(140, 478); $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
+            $btnSelectNone.Add_Click({ foreach ($item in $listView.Items) { $item.Checked = $false } }.GetNewClosure())
             $form.Controls.Add($btnSelectNone)
 
             $btnUpdate = New-Object System.Windows.Forms.Button
-            $btnUpdate.Text = "Update Selected"; $btnUpdate.Location = New-Object System.Drawing.Point(340, 448); $btnUpdate.Size = New-Object System.Drawing.Size(190, 34)
+            $btnUpdate.Text = "Update Selected"; $btnUpdate.Location = New-Object System.Drawing.Point(500, 478); $btnUpdate.Size = New-Object System.Drawing.Size(230, 34)
             $btnUpdate.BackColor = [System.Drawing.Color]::FromArgb(60,140,60); $btnUpdate.ForeColor = [System.Drawing.Color]::White
             $btnUpdate.DialogResult = [System.Windows.Forms.DialogResult]::OK
             $form.Controls.Add($btnUpdate); $form.AcceptButton = $btnUpdate
 
             $btnCancel = New-Object System.Windows.Forms.Button
-            $btnCancel.Text = "Skip All"; $btnCancel.Location = New-Object System.Drawing.Point(340, 488); $btnCancel.Size = New-Object System.Drawing.Size(190, 30)
+            $btnCancel.Text = "Skip All"; $btnCancel.Location = New-Object System.Drawing.Point(500, 518); $btnCancel.Size = New-Object System.Drawing.Size(230, 30)
             $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
             $form.Controls.Add($btnCancel); $form.CancelButton = $btnCancel
 
-            Add-RainbowFooter -Form $form
+            Add-RainbowFooter -Form $form   # 👉 branded footer added to this window too
+
             $result = $form.ShowDialog()
 
             if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-                $checkedIndexes = @()
-                for ($i = 0; $i -lt $checkList.Items.Count; $i++) { if ($checkList.GetItemChecked($i)) { $checkedIndexes += $i } }
-
-                foreach ($i in $checkedIndexes) {
-                    $pkg = $packages[$i]
-                    Write-Host "  Updating: $($pkg.Name)..." -ForegroundColor DarkGray
-                    winget upgrade --id $pkg.Id --silent --accept-package-agreements --accept-source-agreements
+                foreach ($item in $listView.Items) {
+                    if ($item.Checked) {
+                        $pkg = $packages | Where-Object { $_.Name -eq $item.Text } | Select-Object -First 1
+                        Write-Host "  Updating: $($pkg.Name) ($($pkg.CurrentVersion) -> $($pkg.AvailableVersion))..." -ForegroundColor DarkGray
+                        # 👉 --release-channel stable enforces stable-only installs at the winget level as a second safety net, in addition to the pre-filter above
+                        winget upgrade --id $pkg.Id --silent --accept-package-agreements --accept-source-agreements
+                    }
                 }
                 Write-Host "[+] Selected app updates complete." -ForegroundColor Green
             } else {
