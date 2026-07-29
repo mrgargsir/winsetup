@@ -147,8 +147,25 @@ function Remove-WindowsBloat {
 
     $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera", "Microsoft.NetworkSpeedTest","Microsoft.WindowsAlarms","Microsoft.WindowsSoundRecorder","Microsoft.Todos")
 
-    $BloatApps = @("Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather","Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer","Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal","Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp","Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI","Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider","Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo","Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","MicrosoftTeams","Clipchamp.Clipchamp","Microsoft.549981C3F5F10","MicrosoftTeams","MSTeams","Microsoft.Teams")
+    $BloatApps = @(
+    "Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather",
+    "Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer",
+    "Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal",
+    "Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp",
+    "Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI",
+    "Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider",
+    "Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo",
+    "Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","Clipchamp.Clipchamp",
+    "Microsoft.549981C3F5F10","MicrosoftTeams","MSTeams","Microsoft.Teams",
+    "SpotifyAB.SpotifyMusic","LinkedInforWindows","Disney.37853FC22B2CE","Microsoft.MicrosoftJournal",
+    "Microsoft.BingSearch","Microsoft.WindowsCommunicationsApps","Microsoft.WindowsWebExperience",
+    "Microsoft.Copilot","MicrosoftCorporationII.MicrosoftFamily","MicrosoftCorporationII.QuickAssist",
+    "AmazonVideo.PrimeVideo","Facebook.Facebook","Twitter.Twitter","BytedancePte.Ltd.TikTok",
+    "5319275A.WhatsAppDesktop","AD2F1837.HPPrinterControl"
+)
     
+
+
     foreach ($app in $BloatApps) {
         if ($KeepApps -notcontains $app) {
             Write-Host "  Removing $app" -ForegroundColor DarkGray
@@ -156,27 +173,123 @@ function Remove-WindowsBloat {
             Get-AppxProvisionedPackage -Online | Where-Object DisplayName -EQ $app | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
         }
     }
+
+    # Teams Machine-Wide Installer (classic MSI - Remove-AppxPackage never touches this)
+$teamsMwi = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -match "Teams Machine-Wide Installer" }
+foreach ($t in $teamsMwi) {
+    Write-Host "Removing Teams Machine-Wide Installer..." -ForegroundColor DarkGray
+    Start-Process msiexec.exe -ArgumentList "/x $($t.PSChildName) /qn /norestart" -Wait
+}
+
     Write-Host "[+] Bloatware removal complete." -ForegroundColor Green
 }
 
 #---------------- SECTION 1B: START MENU BLOAT ----------------
 function Clear-StartMenuBloat {
     Write-Host "`nClearing leftover Start menu bloat..." -ForegroundColor Cyan
-    Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
-    $startBin = "$env:LOCALAPPDATA\Packages\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\LocalState\start2.bin"
-    Remove-Item $startBin -Force -ErrorAction SilentlyContinue
 
-    # Also purge stray shortcuts from common Start Menu folders
-    $bloatNames = "Teams","Xbox","Solitaire","Disney","Spotify","TikTok","Netflix","LinkedIn","Candy Crush"
+    # 1. Remove provisioned stub packages first - this is what actually stops regeneration
+    $stubApps = @("SpotifyAB.SpotifyMusic","LinkedInforWindows","Disney.37853FC22B2CE","Facebook.Facebook","BytedancePte.Ltd.TikTok","AmazonVideo.PrimeVideo")
+    foreach ($app in $stubApps) {
+        Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq $app |
+            Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
+        Get-AppxPackage -Name $app -AllUsers -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+    }
+
+    # 2. Kill Start host processes and clear FULL tile cache, not just start2.bin
+    Stop-Process -Name StartMenuExperienceHost -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name ShellExperienceHost -Force -ErrorAction SilentlyContinue
+    $startDb = "$env:LOCALAPPDATA\Packages\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\LocalState"
+    Remove-Item "$startDb\*.bin" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$startDb\StartMenuLayoutCache" -Recurse -Force -ErrorAction SilentlyContinue
+
+    # 3. Purge stray shortcuts from Start Menu folders (unchanged, expanded list)
+    $bloatNames = "Teams","Xbox","Solitaire","Disney","Spotify","TikTok","Netflix","LinkedIn","Candy Crush","Prime Video","Facebook"
     $startPaths = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
     foreach ($path in $startPaths) {
         Get-ChildItem $path -Recurse -Include *.lnk -ErrorAction SilentlyContinue |
-            Where-Object { $bloatNames | ForEach-Object { $_.Name -match [regex]::Escape($_) } } |
+            Where-Object { $n = $_.BaseName; ($bloatNames | Where-Object { $n -match [regex]::Escape($_) }) } |
             Remove-Item -Force -ErrorAction SilentlyContinue
     }
     Write-Host "Start menu bloat cleared." -ForegroundColor Green
 }
+
+function Remove-OEMBloat {
+    Write-Host "`nDetecting OEM and removing vendor bloat..." -ForegroundColor Cyan
+    $manufacturer = (Get-CimInstance Win32_ComputerSystem).Manufacturer
+    $oemApps = @{
+        "Dell"    = @("Dell SupportAssist","Dell Digital Delivery","Dell Optimizer","Dell Update","SupportAssist")
+        "HP"      = @("HP Support Assistant","HP JumpStart","HP Documentation","HPSA Service","HP System Info HSA Service")
+        "Lenovo"  = @("Lenovo Vantage","Lenovo Utility","Lenovo Companion","Lenovo App Explorer")
+    }
+    $matchVendor = $oemApps.Keys | Where-Object { $manufacturer -match $_ }
+    if (-not $matchVendor) { Write-Host "No matching OEM vendor bloat list for '$manufacturer'." -ForegroundColor Yellow; return }
+
+    $targets = $oemApps[$matchVendor]
+    $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
+    foreach ($t in $targets) {
+        $match = $installed | Where-Object { $_.DisplayName -match [regex]::Escape($t) }
+        foreach ($m in $match) {
+            Write-Host "Removing OEM app: $($m.DisplayName)" -ForegroundColor DarkGray
+            if ($m.UninstallString -match "msiexec") {
+                Start-Process msiexec.exe -ArgumentList "/x $($m.PSChildName) /qn /norestart" -Wait
+            } else {
+                Start-Process cmd.exe -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -Wait -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    Write-Host "OEM bloat removal complete for $matchVendor." -ForegroundColor Green
+}
  
+function Disable-Recall {
+    Write-Host "`nDisabling Windows Recall..." -ForegroundColor Cyan
+    $build = [System.Environment]::OSVersion.Version.Build
+    if ($build -lt 26100) {
+        Write-Host "Skipped - Recall not available on this Windows build." -ForegroundColor Yellow
+        return
+    }
+    $recallPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI"
+    if (-not (Test-Path $recallPath)) { New-Item -Path $recallPath -Force | Out-Null }
+    Set-ItemProperty -Path $recallPath -Name "DisableAIDataAnalysis" -Value 1 -Type DWord -Force
+    Get-AppxPackage -Name "*Microsoft.Windows.AI.Recall*" -AllUsers -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Write-Host "Recall disabled." -ForegroundColor Green
+}
+
+#---------------- SECTION 1C: START MENU TWEAKS ----------------
+function Set-StartMenuTweaks {
+    Write-Host "`nApplying Start menu tweaks..." -ForegroundColor Cyan
+
+    if ($scriptIsWin81OrOlder) {
+        Write-Host "Skipped - modern Start menu layout options don't exist on this Windows version." -ForegroundColor Yellow
+        return
+    }
+
+    $advPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    if (-not (Test-Path $advPath)) { New-Item -Path $advPath -Force | Out-Null }
+
+    # 1. Switch Start layout to "More pins" (grid view) instead of "More recommendations"
+    #    0 = Default, 1 = More pins, 2 = More recommendations
+    Set-ItemProperty -Path $advPath -Name "Start_Layout" -Value 1 -Type DWord -Force
+    Write-Host "Start layout set to grid (More pins)." -ForegroundColor DarkGray
+
+    # 2. Stop tracking recently opened docs/apps (feeds the Recommended section)
+    Set-ItemProperty -Path $advPath -Name "Start_TrackDocs" -Value 0 -Type DWord -Force
+    Set-ItemProperty -Path $advPath -Name "Start_TrackProgs" -Value 0 -Type DWord -Force
+
+    # 3. Hide Recommended section entirely (Windows 11 23H2/24H2 policy key)
+    $policyPath = "HKCU:\Software\Policies\Microsoft\Windows\Explorer"
+    if (-not (Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
+    Set-ItemProperty -Path $policyPath -Name "HideRecommendedSection" -Value 1 -Type DWord -Force
+
+    # Also apply the machine-wide policy so it survives profile-level resets
+    $policyPathMachine = "HKLM:\Software\Policies\Microsoft\Windows\Explorer"
+    if (-not (Test-Path $policyPathMachine)) { New-Item -Path $policyPathMachine -Force | Out-Null }
+    Set-RegValueSafe $policyPathMachine "HideRecommendedSection" 1
+
+    Write-Host "Recommended section hidden and grid layout applied." -ForegroundColor Green
+}
+
 # ---------------- SECTION 2: SOFTWARE UNINSTALLER (GUI CHECKBOX) ----------------
 function Show-InstalledSoftware {
     Write-Host "`n[*] Scanning installed software..." -ForegroundColor Cyan
@@ -968,7 +1081,7 @@ function Set-NetworkOptimizations {
     # 2. Set DNS to Cloudflare (primary) + Google (secondary) on active adapters
     $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
     foreach ($adapter in $adapters) {
-        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("1.1.1.1","8.8.8.8") -ErrorAction SilentlyContinue
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("8.8.8.8","1.1.1.1") -ErrorAction SilentlyContinue
         Write-Host "DNS set to Cloudflare/Google on $($adapter.Name)." -ForegroundColor DarkGray
     }
     ipconfig /flushdns | Out-Null
@@ -985,7 +1098,77 @@ function Set-NetworkOptimizations {
     Write-Host "Network optimizations applied." -ForegroundColor Green
 }
 
+# ---------------- SECTION 23: FAST STARTUP ----------------
+function Disable-FastStartup {
+    Write-Host "`nDisabling Fast Startup..." -ForegroundColor Cyan
+    $powerPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power"
+    Set-ItemProperty -Path $powerPath -Name "HiberbootEnabled" -Value 0 -Type DWord -Force
+    Write-Host "Fast Startup disabled." -ForegroundColor Green
+}
 
+# ---------------- SECTION 24: SEARCH INDEXER + SYSMAN ----------------
+function Set-IndexerAndSysMain {
+    Write-Host "`nTuning Search Indexer and SysMain..." -ForegroundColor Cyan
+    $ramGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+
+    if ($ramGB -le 8) {
+        Set-Service -Name SysMain -StartupType Disabled -ErrorAction SilentlyContinue
+        Stop-Service -Name SysMain -Force -ErrorAction SilentlyContinue
+        Write-Host "SysMain disabled (low RAM system: $ramGB GB)." -ForegroundColor DarkGray
+    } else {
+        Write-Host "SysMain left enabled ($ramGB GB RAM - benefits from prefetching)." -ForegroundColor DarkGray
+    }
+
+    Write-Host "Indexer/SysMain tuning complete." -ForegroundColor Green
+}
+
+function Optimize-BackgroundServices {
+    Write-Host "`nOptimizing background services and notifications..." -ForegroundColor Cyan
+
+    # 1. Disable Welcome Experience & first-login tips spam
+    $cdmPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+    if (-not (Test-Path $cdmPath)) { New-Item -Path $cdmPath -Force | Out-Null }
+    $welcomeSettings = @{
+        "SubscribedContent-310093Enabled" = 0   # Welcome experience after updates/sign-in
+        "SubscribedContent-338389Enabled" = 0   # "Suggest ways to get the most out of Windows"
+        "SubscribedContent-353698Enabled" = 0   # Get tips and suggestions while using Windows
+    }
+    foreach ($key in $welcomeSettings.Keys) {
+        Set-ItemProperty -Path $cdmPath -Name $key -Value $welcomeSettings[$key] -Type DWord -Force
+    }
+    Write-Host "Welcome experience and tips disabled." -ForegroundColor DarkGray
+
+    # 2. Enable Clipboard History (opposite direction - a wanted feature, not bloat)
+    $clipboardPath = "HKCU:\Software\Microsoft\Clipboard"
+    if (-not (Test-Path $clipboardPath)) { New-Item -Path $clipboardPath -Force | Out-Null }
+    Set-ItemProperty -Path $clipboardPath -Name "EnableClipboardHistory" -Value 1 -Type DWord -Force
+    Write-Host "Clipboard history enabled (Win+V)." -ForegroundColor DarkGray
+
+    # 3. Safe-to-disable background services (expanded)
+    $servicesToDisable = @(
+        "DiagTrack",             # Connected User Experiences and Telemetry
+        "dmwappushservice",      # WAP Push message routing (telemetry-adjacent)
+        "WerSvc",                # Windows Error Reporting
+        "RetailDemo",            # Retail Demo Service (irrelevant outside retail store displays)
+        "MapsBroker"           # Downloaded Maps Manager (if Maps app removed)
+        )
+
+    foreach ($svc in $servicesToDisable) {
+        $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
+        if ($s) {
+            Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+            Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+            Write-Host "Disabled service: $svc" -ForegroundColor DarkGray
+        }
+    }
+
+    # 4. Force-deny background app activity for UWP apps globally
+    $appPrivacyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
+    if (-not (Test-Path $appPrivacyPath)) { New-Item -Path $appPrivacyPath -Force | Out-Null }
+    Set-ItemProperty -Path $appPrivacyPath -Name "LetAppsRunInBackground" -Value 2 -Type DWord -Force
+
+    Write-Host "Background services and notification settings optimized." -ForegroundColor Green
+}
 
 # ============================================================
 # 👉 MASTER WINDOWS SETUP & CLEANUP SCRIPT
@@ -1001,6 +1184,9 @@ function Show-MasterMenu {
         "Make Partition" = @{ Fn = "New-DataPartitionFromFreeSpace"; Checked = $true }
         "Remove Windows Bloatware (keep Calculator/Notepad/Paint/Photos/Store)" = @{ Fn = "Remove-WindowsBloat"; Checked = $true }
         "Remove Start Menu Bloat" = @{ Fn = "Clear-StartMenuBloat"; Checked = $true }
+        "Remove OEM Bloat (Dell/HP/Lenovo)" = @{ Fn = "Remove-OEMBloat"; Checked = $true }
+        "Disable Windows Recall"           = @{ Fn = "Disable-Recall"; Checked = $true }
+        "Start Menu Tweaks (hide recommended, grid layout)" = @{ Fn = "Set-StartMenuTweaks"; Checked = $true }
         "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }
         "Taskbar Tweaks (Left align, Search icon-only, Hide Task View, Widgets off)" = @{ Fn = "Set-TaskbarTweaks"; Checked = $true }
         "File Explorer Tweaks (This PC default, Show hidden items)"            = @{ Fn = "Set-ExplorerTweaks"; Checked = $true }
@@ -1023,6 +1209,9 @@ function Show-MasterMenu {
         "Performance-Focused Visual Effects"                                   = @{ Fn = "Set-PerformanceVisuals"; Checked = $false }
         "Repair Print Spooler & Font Cache"            = @{ Fn = "Repair-PrintAndFontCache"; Checked = $true}
         "Network Optimizations (NLA delay, DNS, IPv6)" = @{ Fn = "Set-NetworkOptimizations"; Checked = $true }
+        "Disable Fast Startup"                                                 = @{ Fn = "Disable-FastStartup"; Checked = $true }
+        "Tune Search Indexer and SysMain"                                      = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
+        "Optimize Background Services + Notifications + Clipboard" = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
     }
 
     # 👉 ---- Build GUI ----
