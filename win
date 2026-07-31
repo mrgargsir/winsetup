@@ -417,9 +417,21 @@ function Disable-StartupItems {
     Write-Host "`n[*] Disabling common startup items..." -ForegroundColor Cyan
 
     # 👉 Whitelist - these are NEVER touched, auto or manual selection skips them entirely
-    $whitelistKeywords = @("onedrive", "(default)", "MicrosoftList","Microsoft.Lists","PDF24", "RtkAudUService", "SecurityHealth","edgeupdate", "GoogleUpdate", "GoogleDriveFS")
+    $whitelistKeywords = @(
+    "onedrive","default","MicrosoftList","Microsoft.Lists","PDF24","RtkAudUService","SecurityHealth",
+    "edgeupdate","GoogleUpdate","GoogleDriveFS",
+    "bit4id","cryptoidmon","hyperpki","ncodepkicomponent","b4notify","securityhealthsystray"
+)
 
-    $targetKeywords = @("anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","spotify","discord","teams","adobe","acrord32","acrotray","skype","steam","epicgameslauncher","autodesk","autocad","bently","staad","vlc","zoom","dropbox","skypeapp","slack","notepad++","putty","winscp","filezilla","teamviewer","Adobe", "Grammarly")
+    $targetKeywords = @(
+    "anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","spotify","discord",
+    "teams","adobe","acrord32","acrotray","adobecollabsync","skype","steam","epicgameslauncher","autodesk",
+    "autocad","bently","staad","vlc","zoom","dropbox","skypeapp","slack","notepad","putty","winscp","filezilla",
+    "teamviewer","grammarly",
+    "dopdf","printershare","hpwuschd","hp software update","lenovovantage","sunjavaupdatesched",
+    "wd_spsocketserver","wd_stdcertm","wondershare","netsetman","camo studio","intel.*graphics command center",
+    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal"
+)
 
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
     $startupApprovedPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run","HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32")
