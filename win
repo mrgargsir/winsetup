@@ -1182,6 +1182,30 @@ function Optimize-BackgroundServices {
     Write-Host "Background services and notification settings optimized." -ForegroundColor Green
 }
 
+function Set-PowerSleepNever {
+    Write-Host "`nSetting sleep to Never when plugged in..." -ForegroundColor Cyan
+
+    # Get the active power scheme GUID
+    $activeScheme = (powercfg /getactivescheme) -replace '.*GUID: ([a-f0-9-]+).*', '$1'
+
+    # 0 = Never (in seconds, 0 disables the timeout)
+    powercfg /change standby-timeout-ac 0
+    powercfg /change monitor-timeout-ac 0
+    powercfg /change hibernate-timeout-ac 0
+
+    # Leave battery behavior untouched (still sleeps on battery to save power)
+    Write-Host "Sleep, monitor, and hibernate timeouts set to Never on AC power." -ForegroundColor DarkGray
+
+    # Fix for the hidden 'System unattended sleep timeout' that overrides Never on some builds
+    $unattendedSleepGuid = "7bc4a2f9-d8fc-4469-b07b-33eb785aaca0"
+    $subgroupGuid = "238C9FA8-0AAD-41ED-83F4-97BE242C8F20"  # Sleep subgroup
+    powercfg /setacvalueindex $activeScheme $subgroupGuid $unattendedSleepGuid 0
+    powercfg /setactive $activeScheme
+
+    Write-Host "Sleep set to Never (including hidden unattended sleep timeout)." -ForegroundColor Green
+}
+
+
 # ============================================================
 # 👉 MASTER WINDOWS SETUP & CLEANUP SCRIPT
 # 👉 Developed By @MRGARGSIR
@@ -1224,6 +1248,7 @@ function Show-MasterMenu {
         "Disable Fast Startup"                                                 = @{ Fn = "Disable-FastStartup"; Checked = $true }
         "Tune Search Indexer and SysMain"                                      = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
         "Optimize Background Services + Notifications + Clipboard" = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
+        "Disable Sleep When Plugged In" = @{ Fn = "Set-PowerSleepNever"; Checked = $true }
     }
 
     # 👉 ---- Build GUI ----
