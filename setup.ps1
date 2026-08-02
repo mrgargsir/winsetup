@@ -19,7 +19,7 @@ if (-not $isAdmin) {
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -ErrorAction Stop
         } else {
             # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
-            $elevateCommand = "irm https://mrgargsir.github.io/winsetup/win | iex"
+            $elevateCommand = "irm https://mrgargsir.github.io/winsetup/setup.ps1 | iex"
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
         }
     } catch {
@@ -37,6 +37,17 @@ if (-not $isAdmin) {
 Set-ExecutionPolicy Bypass -Scope Process -Force
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+# 👉 moved to global scope - was previously nested inside Set-TaskbarTweaks only, so
+# 👉 other functions like Set-StartMenuTweaks couldn't see it
+# 👉 helper: applies a value, and if access is denied (protected key on newer builds), prints a quiet yellow skip note instead of a red error
+function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
+    try {
+        Set-ItemProperty -Path $path -Name $name -Value $value -Type $type -Force -ErrorAction Stop
+    } catch {
+        Write-Host "  Skipped '$name' (protected by this Windows build, no reliable workaround)" -ForegroundColor Yellow
+    }
+}
 
 # 👉 Global OS detection - used throughout the script to skip features that don't exist on older Windows
 $script:OSVersion = [System.Environment]::OSVersion.Version
@@ -218,27 +229,57 @@ function Clear-StartMenuBloat {
 function Remove-OEMBloat {
     Write-Host "`nDetecting OEM and removing vendor bloat..." -ForegroundColor Cyan
     $manufacturer = (Get-CimInstance Win32_ComputerSystem).Manufacturer
+
+    # 👉 expanded Dell list - added Dell Sync, Peripheral Manager, Pair, Mobile Connect,
+    # 👉 Power Manager, Cinema, Product Registration, Watchdog, MyDell, Trusted Device, etc.
     $oemApps = @{
-        "Dell"    = @("Dell SupportAssist","Dell Digital Delivery","Dell Optimizer","Dell Update","SupportAssist")
+        "Dell"    = @("Dell SupportAssist","Dell Digital Delivery","Dell Optimizer","Dell Update","SupportAssist",
+                      "Dell Sync","Dell Peripheral Manager","Dell Pair","Dell Mobile Connect","Dell Power Manager",
+                      "Dell Cinema","Dell Product Registration","Dell Watchdog Timer","MyDell","Dell Core Services",
+                      "Dell SupportAssist Remediation","Dell SupportAssist OS Recovery","Dell Trusted Device Agent",
+                      "Dell Command | Update","Dell Display Manager")
         "HP"      = @("HP Support Assistant","HP JumpStart","HP Documentation","HPSA Service","HP System Info HSA Service")
         "Lenovo"  = @("Lenovo Vantage","Lenovo Utility","Lenovo Companion","Lenovo App Explorer")
     }
-    $matchVendor = $oemApps.Keys | Where-Object { $manufacturer -match $_ }
-    if (-not $matchVendor) { Write-Host "No matching OEM vendor bloat list for '$manufacturer'." -ForegroundColor Yellow; return }
 
-    $targets = $oemApps[$matchVendor]
+    # 👉 NEW: vendor-agnostic "useless software" list - this junk ships on Dell/HP/Lenovo/Asus alike
+    # 👉 regardless of chipset (Realtek/Waves), so it's checked no matter what the manufacturer is
+    $commonBloat = @(
+        "Waves MaxxAudio","Waves Audio","MaxxAudio","Dolby Access","Dolby Audio",
+        "McAfee","Norton Security","WildTangent","Booking.com","Amazon Assistant",
+        "Realtek Audio Console"
+    )
+
     $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
-    foreach ($t in $targets) {
-        $match = $installed | Where-Object { $_.DisplayName -match [regex]::Escape($t) }
-        foreach ($m in $match) {
-            Write-Host "Removing OEM app: $($m.DisplayName)" -ForegroundColor DarkGray
-            if ($m.UninstallString -match "msiexec") {
-                Start-Process msiexec.exe -ArgumentList "/x $($m.PSChildName) /qn /norestart" -Wait
-            } else {
-                Start-Process cmd.exe -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -Wait -ErrorAction SilentlyContinue
+
+    # 👉 helper block reused for both lists below
+    $removeMatching = {
+        param($targets)
+        foreach ($t in $targets) {
+            $match = $installed | Where-Object { $_.DisplayName -match [regex]::Escape($t) }
+            foreach ($m in $match) {
+                Write-Host "Removing: $($m.DisplayName)" -ForegroundColor DarkGray
+                if ($m.UninstallString -match "msiexec") {
+                    Start-Process msiexec.exe -ArgumentList "/x $($m.PSChildName) /qn /norestart" -Wait
+                } else {
+                    Start-Process cmd.exe -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -Wait -ErrorAction SilentlyContinue
+                }
             }
         }
     }
+
+    # 👉 always run the common junk list first, regardless of vendor match
+    Write-Host "Checking for common third-party bloat (audio enhancers, trial security, etc.)..." -ForegroundColor Cyan
+    & $removeMatching $commonBloat
+
+    $matchVendor = $oemApps.Keys | Where-Object { $manufacturer -match $_ }
+    if (-not $matchVendor) {
+        Write-Host "No matching OEM vendor bloat list for '$manufacturer'." -ForegroundColor Yellow
+        Write-Host "OEM bloat removal complete." -ForegroundColor Green
+        return
+    }
+
+    & $removeMatching $oemApps[$matchVendor]
     Write-Host "OEM bloat removal complete for $matchVendor." -ForegroundColor Green
 }
  
@@ -430,7 +471,7 @@ function Disable-StartupItems {
     "teamviewer","grammarly",
     "dopdf","printershare","hpwuschd","hp software update","lenovovantage","sunjavaupdatesched",
     "wd_spsocketserver","wd_stdcertm","wondershare","netsetman","camo studio","intel.*graphics command center",
-    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal"
+    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat" 
 )
 
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
@@ -599,14 +640,7 @@ function Set-TaskbarTweaks {
     if (-not (Test-Path $advPath)) { New-Item -Path $advPath -Force | Out-Null }
     if (-not (Test-Path $searchPath)) { New-Item -Path $searchPath -Force | Out-Null }
 
-    # 👉 helper: applies a value, and if access is denied (protected key on newer builds), prints a quiet yellow skip note instead of a red error
-    function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
-        try {
-            Set-ItemProperty -Path $path -Name $name -Value $value -Type $type -Force -ErrorAction Stop
-        } catch {
-            Write-Host "  Skipped '$name' (protected by this Windows build, no reliable workaround)" -ForegroundColor Yellow
-        }
-    }
+    
 
     if ($isWin11) {
         # 👉 Taskbar left-align only applies to Windows 11 (Win10 taskbar is always left-aligned already)
@@ -1220,23 +1254,16 @@ function Show-MasterMenu {
         "Make Partition" = @{ Fn = "New-DataPartitionFromFreeSpace"; Checked = $true }
         "Remove Windows Bloatware (keep Calculator/Notepad/Paint/Photos/Store)" = @{ Fn = "Remove-WindowsBloat"; Checked = $true }
         "Remove Start Menu Bloat" = @{ Fn = "Clear-StartMenuBloat"; Checked = $true }
-        "Remove OEM Bloat (Dell/HP/Lenovo)" = @{ Fn = "Remove-OEMBloat"; Checked = $true }
-        "Disable Windows Recall"           = @{ Fn = "Disable-Recall"; Checked = $true }
         "Start Menu Tweaks (hide recommended, grid layout)" = @{ Fn = "Set-StartMenuTweaks"; Checked = $true }
-        "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }
         "Taskbar Tweaks (Left align, Search icon-only, Hide Task View, Widgets off)" = @{ Fn = "Set-TaskbarTweaks"; Checked = $true }
         "File Explorer Tweaks (This PC default, Show hidden items)"            = @{ Fn = "Set-ExplorerTweaks"; Checked = $true }
-        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Browser Tweaks"                          = @{ Fn = "Set-BrowserTweaks"; Checked = $true }
-        "Check for Multiple Antivirus (warning prompt)"                        = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
         "Disable Copilot"                                                      = @{ Fn = "Disable-Copilot"; Checked = $true }
         "Disable Unnecessary Scheduled Tasks"                                  = @{ Fn = "Disable-UnnecessaryScheduledTasks"; Checked = $true }
         "Disable Telemetry + Advertising ID"                                   = @{ Fn = "Disable-TelemetryAndAdvertising"; Checked = $true }
-        "Enable Defender + Update Signatures"                                  = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
         "Check Windows Activation Status"                                      = @{ Fn = "Test-WindowsActivation"; Checked = $true }
         "Check MS Office Activation Status"                                    = @{ Fn = "Test-OfficeActivation"; Checked = $true }
         "Clean Temp Files + Windows Update Cache"                              = @{ Fn = "Clear-TempAndUpdateCache"; Checked = $true }
-        "Update All Apps (Store + Winget + Windows Update)"                    = @{ Fn = "Update-AllApps"; Checked = $true }
         "-- OPTIONAL EXTRAS BELOW --"                                          = @{ Fn = $null; Checked = $false }   # 👉 separator row, not clickable
         "Enable Classic Right-Click Context Menu"                              = @{ Fn = "Enable-ClassicContextMenu"; Checked = $true }
         "Disable Lock Screen Ads / Tips"                                       = @{ Fn = "Disable-LockScreenAdsAndTips"; Checked = $true }
@@ -1249,6 +1276,13 @@ function Show-MasterMenu {
         "Tune Search Indexer and SysMain"                                      = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
         "Optimize Background Services + Notifications + Clipboard" = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
         "Disable Sleep When Plugged In" = @{ Fn = "Set-PowerSleepNever"; Checked = $true }
+        "Remove OEM Bloat (Dell/HP/Lenovo)" = @{ Fn = "Remove-OEMBloat"; Checked = $true }
+        "Disable Windows Recall"           = @{ Fn = "Disable-Recall"; Checked = $true }
+        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
+        "Check for Multiple Antivirus (warning prompt)"                        = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
+        "Enable Defender + Update Signatures"                                  = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
+        "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }
+        "Update All Apps (Store + Winget + Windows Update)"                    = @{ Fn = "Update-AllApps"; Checked = $true }
     }
 
     # 👉 ---- Build GUI ----
@@ -1377,3 +1411,164 @@ function Show-MasterMenu {
 # 👉 ENTRY POINT - launches the menu when script is run
 # ============================================================
 Show-MasterMenu
+
+# SIG # Begin signature block
+# MIIdkQYJKoZIhvcNAQcCoIIdgjCCHX4CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3ojlhvWyQW58G
+# +d4DMyTdJCfHsHIsiFNhLlDvn7r8XKCCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
+# nkj+CleM2KE8MA0GCSqGSIb3DQEBCwUAMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQK
+# DAlNUkdBUkdTSVIxEjAQBgNVBAMMCU1SR0FSR1NJUjAeFw0yNTExMDUxMzI2MjNa
+# Fw0zMDExMDUxMzM2MjNaMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQKDAlNUkdBUkdT
+# SVIxEjAQBgNVBAMMCU1SR0FSR1NJUjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCC
+# AQoCggEBAMtmn8hurJzsnfSgdBPyFEkN/1fidMQmriZ11pFBlAQxEPoIrK0IaHkk
+# mrm+WEQsPWR8UswV0dlpAou4kpFT4C3+eJRfy9peRz7TQpCdnhTFcjffUgEzMSr8
+# S16kDQIzpauFxuzukPmeeDArhZjuRbMJ3QE+iWDQQBa35PRVkKMmm83jFXVgmSHk
+# GBRcBtxRoev0TBnsX11EJDRrLA9RI1EaRxTWxTMxZ6En2r9Zd4vv3j7zG82OSdg2
+# nJeBz2RRTJ1Y09WywODhWCZn7OKuBynEFgrxTt49RMiTW5rvgGFRZ0gVhMuma+My
+# ZvkcQWSMGvCnPd3EFeSAjJ9Q94IxBQECAwEAAaNGMEQwDgYDVR0PAQH/BAQDAgeA
+# MBMGA1UdJQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBRhvmd8JzCVARuMcrY+l047
+# ReBaizANBgkqhkiG9w0BAQsFAAOCAQEAT7pg8CGnj9VpnuHF+76Qi2pG4oEBRiDf
+# QVAdprVYFuFDKCqcAhb8XLKilzWRIUiS+CUX9CdNvCYnKrJoO26PsoK5uA2H9jZ3
+# BKRZOyNtcc8kOFH7cyeIxEP660DJzcT30ZvPvR6FCHWCWqLpj9oHkp1dVDw8mWw7
+# Y8VJrWaDo5HZFyHZB7da93ID+PALskxAozUcg695qFOKbxs/MiuQMqC8R0orlM8h
+# ipVx9KsUUA0zG4ICve+EC14FpvNOZSc8aXCpXCVyAgcQ5teWoJ9bmGaFsStBoCQx
+# +jC+pyJCVVCtC0or+YRMeAI+yP2Dc8Z21hoRy6nXA8qofSbxlAMx5TGCGakwghml
+# AgEBMEkwNTELMAkGA1UEBhMCSU4xEjAQBgNVBAoMCU1SR0FSR1NJUjESMBAGA1UE
+# AwwJTVJHQVJHU0lSAhB7tTJ3UBw4nkj+CleM2KE8MA0GCWCGSAFlAwQCAQUAoIG4
+# MBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgor
+# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCvi+dVUGQXr7P807Wq6YvYpyhOzO0e
+# tRh68Ld5HSI5qzBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
+# AFUAdABpAGwAaQB0AHkAIABiAHkAIABtAHIAZwBhAHIAZwBzAGkAcjANBgkqhkiG
+# 9w0BAQEFAASCAQCPBn+/ApoS5Yy4zpK97zi2ShJoRLD9S03bVvXlCuqYWMCX+KO/
+# RK58xHKJ0HZtSWWTlUKcQbk9+G4DITrQiecX2K47Gb83V77a5/dGOZAPal468DgS
+# rAlFAFnfaheez9gWQGJ+sTr9LwIBNsiIDY/lTZRCm9rEvHqhZekm19OrGi/XdBEE
+# t6LamM2rplx/xUcg3npAHJAIIQnh2iu/iFauXBFxNklCIKIdWlfeR2omsBrXH+B8
+# laOsYk+nYmo5v235WHVMpi4ydqd9O1uohYGo0p+5xbeoGq4yiAbSuWydB3sbJuTr
+# CJ/RNUfP6RQzbfUZLomJPC1d+v0guip1pdiloYIXdjCCF3IGCisGAQQBgjcDAwEx
+# ghdiMIIXXgYJKoZIhvcNAQcCoIIXTzCCF0sCAQMxDzANBglghkgBZQMEAgEFADB3
+# BgsqhkiG9w0BCRABBKBoBGYwZAIBAQYJYIZIAYb9bAcBMDEwDQYJYIZIAWUDBAIB
+# BQAEIPPj80PjFmfhKusZBrHRF+iHLGiuMm9/m1PmG8TZjPTQAhBTAWD+zRqIVchY
+# v6Lo+G8oGA8yMDI2MDgwMjEzMDcxOFqgghM6MIIG7TCCBNWgAwIBAgIQCoDvGEuN
+# 8QWC0cR2p5V0aDANBgkqhkiG9w0BAQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UE
+# ChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQg
+# VGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAw
+# MDAwMFoXDTM2MDkwMzIzNTk1OVowYzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRp
+# Z2lDZXJ0LCBJbmMuMTswOQYDVQQDEzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBU
+# aW1lc3RhbXAgUmVzcG9uZGVyIDIwMjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBANBGrC0Sxp7Q6q5gVrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx
+# +wvA69HFTBdwbHwBSOeLpvPnZ8ZN+vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvN
+# Zh6wW2R6kSu9RJt/4QhguSssp3qome7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlL
+# nh00Cll8pjrUcCV3K3E0zz09ldQ//nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmn
+# cOOMA3CoB/iUSROUINDT98oksouTMYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhw
+# UmotuQhcg9tw2YD3w6ySSSu+3qU8DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL
+# 4Q1OpbybpMe46YceNA0LfNsnqcnpJeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnD
+# uSeHVZlc4seAO+6d2sC26/PQPdP51ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCy
+# FG1roSrgHjSHlq8xymLnjCbSLZ49kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7a
+# SUROwnu7zER6EaJ+AliL7ojTdS5PWPsWeupWs7NpChUk555K096V1hE0yZIXe+gi
+# AwW00aHzrDchIc2bQhpp0IoKRR7YufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGj
+# ggGVMIIBkTAMBgNVHRMBAf8EAjAAMB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBD
+# z2GM6DAfBgNVHSMEGDAWgBTvb1NK6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8E
+# BAMCB4AwFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGF
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUH
+# MAKGUWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRH
+# NFRpbWVTdGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBW
+# MFSgUqBQhk5odHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVk
+# RzRUaW1lU3RhbXBpbmdSU0E0MDk2U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkw
+# FzAIBgZngQwBBAIwCwYJYIZIAYb9bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3x
+# HCcEua5gQezRCESeY0ByIfjk9iJP2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh
+# 8/YmRDfxT7C0k8FUFqNh+tshgb4O6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZS
+# e2F8AQ/UdKFOtj7YMTmqPO9mzskgiC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/
+# JQ/EABgfZXLWU0ziTN6R3ygQBHMUBaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1u
+# NnzQVTeLni2nHkX/QqvXnNb+YkDFkxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq
+# 8/gVutDojBIFeRlqAcuEVT0cKsb+zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwi
+# CZ85EE8LUkqRhoS3Y50OHgaY7T/lwd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ
+# +8Hggt8l2Yv7roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1
+# R9xJgKf47CdxVRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstr
+# niLvUxxVZE/rptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWu
+# iC7POGT75qaL6vdCvHlshtjdNXOCIUjsarfNZzCCBrQwggScoAMCAQICEA3HrFcF
+# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
+# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
+# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
+# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
+# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
+# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
+# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
+# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
+# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
+# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
+# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
+# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
+# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
+# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
+# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
+# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
+# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
+# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
+# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
+# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
+# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
+# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
+# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
+# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
+# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
+# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
+# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
+# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
+# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
+# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
+# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
+# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
+# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
+# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
+# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
+# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggWNMIIEdaADAgECAhAOmxiO+dAt5+/bUOII
+# QBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdp
+# Q2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNVBAMTG0Rp
+# Z2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBaFw0zMTEx
+# MDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMx
+# GTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lDZXJ0IFRy
+# dXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAL/m
+# kHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC4SmnPVirdprNrnsbhA3EMB/zG6Q4
+# FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWlfr6fqVcWWVVyr2iTcMKyunWZanMy
+# lNEQRBAu34LzB4TmdDttceItDBvuINXJIB1jKS3O7F5OyJP4IWGbNOsFxl7sWxq8
+# 68nPzaw0QF+xembud8hIqGZXV59UWI4MK7dPpzDZVu7Ke13jrclPXuU15zHL2pNe
+# 3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3pC4FfYj1gj4QkXCrVYJBMtfbBHMq
+# bpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJpMLmqaBn3aQnvKFPObURWBf3JFxG
+# j2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aadMreSx7nDmOu5tTvkpI6nj3cAORF
+# JYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXDj/chsrIRt7t/8tWMcCxBYKqxYxhE
+# lRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB4Q+UDCEdslQpJYls5Q5SUUd0vias
+# tkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ33xMdT9j7CFfxCBRa2+xq4aLT8LW
+# RV+dIPyhHsXAj6KxfgommfXkaS+YHS312amyHeUbAgMBAAGjggE6MIIBNjAPBgNV
+# HRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC0nFdZEzfLmc/57qYrhwPTzAfBgNV
+# HSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzAOBgNVHQ8BAf8EBAMCAYYweQYI
+# KwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5j
+# b20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdp
+# Q2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYDVR0fBD4wPDA6oDigNoY0aHR0cDov
+# L2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNybDAR
+# BgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcNAQEMBQADggEBAHCgv0NcVec4X6Cj
+# dBs9thbX979XB72arKGHLOyFXqkauyL4hxppVCLtpIh3bb0aFPQTSnovLbc47/T/
+# gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6mouyXtTP0UNEm0Mh65ZyoUi0mcud
+# T6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPHh6jSTEAZNUZqaVSwuKFWjuyk1T3o
+# sdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCNNWAcAgPLILCsWKAOQGPFmCLBsln1
+# VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg62fC2h5b9W9FcrBjDTZ9ztwGpn1eq
+# XijiuZQxggN8MIIDeAIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
+# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
+# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgw
+# DQYJYIZIAWUDBAIBBQCggdEwGgYJKoZIhvcNAQkDMQ0GCyqGSIb3DQEJEAEEMBwG
+# CSqGSIb3DQEJBTEPFw0yNjA4MDIxMzA3MThaMCsGCyqGSIb3DQEJEAIMMRwwGjAY
+# MBYEFN1iMKyGCi0wa9o4sWh5UjAH+0F+MC8GCSqGSIb3DQEJBDEiBCAtIHFrxh8o
+# 7wb6//aadZbxx5ghQmUHtjpS3Qs93eG7yjA3BgsqhkiG9w0BCRACLzEoMCYwJDAi
+# BCBKoD+iLNdchMVck4+CjmdrnK7Ksz/jbSaaozTxRhEKMzANBgkqhkiG9w0BAQEF
+# AASCAgCwjHntSyv6bn7EZrXYDVLkCO+L85aOoNbSPyg5LYO4pQKiR9RozmT6C4/d
+# O6LV6ZgOGj+R0RqUEW6fapEd8CMO0JArcIZhYONUeKgpujir9MxFPxl4oVFWJYvM
+# U70GMDAO6plekfOc6vX5LVvChcddFw9SYP32l03Bi9Oq0uVOQM6j1V5DKCGMupbB
+# j4g2qfEkGOce2k5jPOmgir5VB/X7WF6ThphvY/JlAue8VexASwgO0vq7WjCtMMco
+# e2QoBcItoyeGgMchMJtQEMUl4lBQxVSfjAwsYO+znbx4MbiaK5DDOsPpy81OMaPD
+# XSbln7/R+cUSKKoB0pF/K/ZW6HIuFMIVP7upw2HzhF6Au78KGZun0O0ge11qWQ5r
+# Zo9wsWDDidaboRDWgswRAJkVBaaX+he2tWO1d00PyV0ojFzJFpUYVEUEwh/N5chL
+# JCYUYEFWV55PoTY3mk43t5IVF89CxQqf9yJNDRy6DLxUA4tsLU/mMlUZLpyCUKMy
+# LoLK3c1pDHYutiv8opYNN1yIIFspHIaAx83CLtfmQB98UV9jVPfM6NRZxxPxc8+x
+# 9xc8SndLZTwYHmWBK+gTB3/0XUfyCKkwIItK7E9xSnsUxKVqYy1s2PN0zI2xis4d
+# CL3ZIHox/s/j6dNs1ZVTOtrlVKzYPVjpW8CkGs3YvMbSLqgvrA==
+# SIG # End signature block
