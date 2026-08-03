@@ -20,6 +20,7 @@ if (-not $isAdmin) {
         } else {
             # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
             $elevateCommand = "irm https://mrgargsir.github.io/winsetup/setup.ps1 | iex"
+            #$elevateCommand = "irm https://mrgargsir.github.io/winsetup/autosetup.ps1 | iex"
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
         }
     } catch {
@@ -46,6 +47,28 @@ function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
         Set-ItemProperty -Path $path -Name $name -Value $value -Type $type -Force -ErrorAction Stop
     } catch {
         Write-Host "  Skipped '$name' (protected by this Windows build, no reliable workaround)" -ForegroundColor Yellow
+    }
+}
+
+function Start-ProcessWithTimeout {
+    param(
+        [string]$FilePath,
+        [string]$ArgumentList,
+        [int]$TimeoutSeconds = 120
+    )
+    try {
+        $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru -ErrorAction Stop
+        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+            Write-Host "  Timed out after $TimeoutSeconds s - killing $FilePath (pid $($proc.Id)) and moving on..." -ForegroundColor Red
+            try {
+                # kill the process tree, not just the parent, in case it spawned a child installer
+                Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue |
+                    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            } catch {}
+        }
+    } catch {
+        Write-Host "  Failed to start $FilePath - $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -190,7 +213,8 @@ $teamsMwi = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Un
     Where-Object { $_.DisplayName -match "Teams Machine-Wide Installer" }
 foreach ($t in $teamsMwi) {
     Write-Host "Removing Teams Machine-Wide Installer..." -ForegroundColor DarkGray
-    Start-Process msiexec.exe -ArgumentList "/x $($t.PSChildName) /qn /norestart" -Wait
+    Start-ProcessWithTimeout -FilePath "msiexec.exe" -ArgumentList "/x $($t.PSChildName) /qn /norestart" -TimeoutSeconds 120
+
 }
 
     Write-Host "[+] Bloatware removal complete." -ForegroundColor Green
@@ -237,7 +261,7 @@ function Remove-OEMBloat {
                       "Dell Sync","Dell Peripheral Manager","Dell Pair","Dell Mobile Connect","Dell Power Manager",
                       "Dell Cinema","Dell Product Registration","Dell Watchdog Timer","MyDell","Dell Core Services",
                       "Dell SupportAssist Remediation","Dell SupportAssist OS Recovery","Dell Trusted Device Agent",
-                      "Dell Command | Update","Dell Display Manager")
+                      "Dell Command | Update","Dell Display Manager","Dell Connected Service Delivery")
         "HP"      = @("HP Support Assistant","HP JumpStart","HP Documentation","HPSA Service","HP System Info HSA Service")
         "Lenovo"  = @("Lenovo Vantage","Lenovo Utility","Lenovo Companion","Lenovo App Explorer")
     }
@@ -247,7 +271,8 @@ function Remove-OEMBloat {
     $commonBloat = @(
         "Waves MaxxAudio","Waves Audio","MaxxAudio","Dolby Access","Dolby Audio",
         "McAfee","Norton Security","WildTangent","Booking.com","Amazon Assistant",
-        "Realtek Audio Console"
+        "Realtek Audio Console", "Gaming Services","Microsoft GameInput","GameInput",
+        "Intel Graphics Command Center", "Tesseract-OCR","NetMirror"
     )
 
     $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
@@ -260,9 +285,9 @@ function Remove-OEMBloat {
             foreach ($m in $match) {
                 Write-Host "Removing: $($m.DisplayName)" -ForegroundColor DarkGray
                 if ($m.UninstallString -match "msiexec") {
-                    Start-Process msiexec.exe -ArgumentList "/x $($m.PSChildName) /qn /norestart" -Wait
+                    Start-ProcessWithTimeout -FilePath "msiexec.exe" -ArgumentList "/x $($m.PSChildName) /qn /norestart" -TimeoutSeconds 120
                 } else {
-                    Start-Process cmd.exe -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -Wait -ErrorAction SilentlyContinue
+                    Start-ProcessWithTimeout -FilePath "cmd.exe" -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -TimeoutSeconds 120
                 }
             }
         }
@@ -338,7 +363,7 @@ function Show-InstalledSoftware {
     $software = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.UninstallString } | Select-Object DisplayName, UninstallString, PSChildName | Sort-Object DisplayName -Unique
 
     # 👉 Always-hidden keywords - these never appear in the uninstall picker
-    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64","rustdesk", "scan to", "winrar", "workflow manager", "google chrome" )
+    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64","rustdesk", "scan to", "winrar", "workflow manager", "google chrome", "windows app runtime" )
 
     # 👉 Filter out any DisplayName containing a hidden keyword (case-insensitive)
     $software = $software | Where-Object {
@@ -471,7 +496,7 @@ function Disable-StartupItems {
     "teamviewer","grammarly",
     "dopdf","printershare","hpwuschd","hp software update","lenovovantage","sunjavaupdatesched",
     "wd_spsocketserver","wd_stdcertm","wondershare","netsetman","camo studio","intel.*graphics command center",
-    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat" 
+    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat", "waves"
 )
 
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
@@ -1368,6 +1393,10 @@ function Show-MasterMenu {
     }
 
     $checkedLabels = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
+
+    # disable ui and enable below to make automated testing easier (no user interaction)
+    #$checkedLabels = $taskList.Keys | Where-Object { $taskList[$_].Fn -and $taskList[$_].Checked }
+    
     if ($checkedLabels.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show("No tweaks selected.", "Info") | Out-Null
         return
