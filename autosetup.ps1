@@ -19,8 +19,7 @@ if (-not $isAdmin) {
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -ErrorAction Stop
         } else {
             # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
-            #$elevateCommand = "irm https://mrgargsir.github.io/winsetup/setup.ps1 | iex"
-            $elevateCommand = "irm https://mrgargsir.github.io/winsetup/autosetup.ps1 | iex"
+            $elevateCommand = "irm https://mrgargsir.github.io/winsetup/setup.ps1 | iex"
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
         }
     } catch {
@@ -47,28 +46,6 @@ function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
         Set-ItemProperty -Path $path -Name $name -Value $value -Type $type -Force -ErrorAction Stop
     } catch {
         Write-Host "  Skipped '$name' (protected by this Windows build, no reliable workaround)" -ForegroundColor Yellow
-    }
-}
-
-function Start-ProcessWithTimeout {
-    param(
-        [string]$FilePath,
-        [string]$ArgumentList,
-        [int]$TimeoutSeconds = 120
-    )
-    try {
-        $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru -ErrorAction Stop
-        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-            Write-Host "  Timed out after $TimeoutSeconds s - killing $FilePath (pid $($proc.Id)) and moving on..." -ForegroundColor Red
-            try {
-                # kill the process tree, not just the parent, in case it spawned a child installer
-                Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue |
-                    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            } catch {}
-        }
-    } catch {
-        Write-Host "  Failed to start $FilePath - $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -213,8 +190,7 @@ $teamsMwi = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Un
     Where-Object { $_.DisplayName -match "Teams Machine-Wide Installer" }
 foreach ($t in $teamsMwi) {
     Write-Host "Removing Teams Machine-Wide Installer..." -ForegroundColor DarkGray
-    Start-ProcessWithTimeout -FilePath "msiexec.exe" -ArgumentList "/x $($t.PSChildName) /qn /norestart" -TimeoutSeconds 120
-
+    Start-Process msiexec.exe -ArgumentList "/x $($t.PSChildName) /qn /norestart" -Wait
 }
 
     Write-Host "[+] Bloatware removal complete." -ForegroundColor Green
@@ -271,8 +247,8 @@ function Remove-OEMBloat {
     $commonBloat = @(
         "Waves MaxxAudio","Waves Audio","MaxxAudio","Dolby Access","Dolby Audio",
         "McAfee","Norton Security","WildTangent","Booking.com","Amazon Assistant",
-        "Realtek Audio Console", "Gaming Services","Microsoft GameInput","GameInput",
-        "Intel Graphics Command Center", "Tesseract-OCR","NetMirror"
+        "Realtek Audio Console","Gaming Services","Microsoft GameInput","GameInput","Intel Graphics Command Center",
+    "Tesseract-OCR","NetMirror"
     )
 
     $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
@@ -285,9 +261,9 @@ function Remove-OEMBloat {
             foreach ($m in $match) {
                 Write-Host "Removing: $($m.DisplayName)" -ForegroundColor DarkGray
                 if ($m.UninstallString -match "msiexec") {
-                    Start-ProcessWithTimeout -FilePath "msiexec.exe" -ArgumentList "/x $($m.PSChildName) /qn /norestart" -TimeoutSeconds 120
+                    Start-Process msiexec.exe -ArgumentList "/x $($m.PSChildName) /qn /norestart" -Wait
                 } else {
-                    Start-ProcessWithTimeout -FilePath "cmd.exe" -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -TimeoutSeconds 120
+                    Start-Process cmd.exe -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -Wait -ErrorAction SilentlyContinue
                 }
             }
         }
@@ -496,7 +472,7 @@ function Disable-StartupItems {
     "teamviewer","grammarly",
     "dopdf","printershare","hpwuschd","hp software update","lenovovantage","sunjavaupdatesched",
     "wd_spsocketserver","wd_stdcertm","wondershare","netsetman","camo studio","intel.*graphics command center",
-    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat", "waves"
+    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat" , "waves"
 )
 
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
@@ -1301,9 +1277,9 @@ function Show-MasterMenu {
         "Tune Search Indexer and SysMain"                                      = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
         "Optimize Background Services + Notifications + Clipboard" = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
         "Disable Sleep When Plugged In" = @{ Fn = "Set-PowerSleepNever"; Checked = $true }
+        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Remove OEM Bloat (Dell/HP/Lenovo)" = @{ Fn = "Remove-OEMBloat"; Checked = $true }
         "Disable Windows Recall"           = @{ Fn = "Disable-Recall"; Checked = $true }
-        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Check for Multiple Antivirus (warning prompt)"                        = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
         "Enable Defender + Update Signatures"                                  = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
         "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }
@@ -1311,90 +1287,88 @@ function Show-MasterMenu {
     }
 
     # 👉 ---- Build GUI ----
-    # $form = New-Object System.Windows.Forms.Form
-    # $form.Text = "MRGARGSIR Windows Setup Utility - @MRGARGSIR"
-    # $form.Size = New-Object System.Drawing.Size(620, 670)
-    # $form.StartPosition = "CenterScreen"
-    # $form.FormBorderStyle = "FixedDialog"
-    # $form.MaximizeBox = $false
-    # $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30)
-    # $form.ForeColor = [System.Drawing.Color]::White
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "MRGARGSIR Windows Setup Utility - @MRGARGSIR"
+    $form.Size = New-Object System.Drawing.Size(620, 670)
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedDialog"
+    $form.MaximizeBox = $false
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30)
+    $form.ForeColor = [System.Drawing.Color]::White
 
-    # $title = New-Object System.Windows.Forms.Label
-    # $title.Text = "Select tweaks to apply"
-    # $title.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
-    # $title.Location = New-Object System.Drawing.Point(10, 10)
-    # $title.AutoSize = $true
-    # $form.Controls.Add($title)
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = "Select tweaks to apply"
+    $title.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+    $title.Location = New-Object System.Drawing.Point(10, 10)
+    $title.AutoSize = $true
+    $form.Controls.Add($title)
 
-    # $checkList = New-Object System.Windows.Forms.CheckedListBox
-    # $checkList.Location = New-Object System.Drawing.Point(10, 44)
-    # $checkList.Size = New-Object System.Drawing.Size(580, 470)
-    # $checkList.CheckOnClick = $true
-    # $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
-    # $checkList.ForeColor = [System.Drawing.Color]::White
-    # $checkList.BorderStyle = "FixedSingle"
-    # $checkList.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    # $form.Controls.Add($checkList)
+    $checkList = New-Object System.Windows.Forms.CheckedListBox
+    $checkList.Location = New-Object System.Drawing.Point(10, 44)
+    $checkList.Size = New-Object System.Drawing.Size(580, 470)
+    $checkList.CheckOnClick = $true
+    $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+    $checkList.ForeColor = [System.Drawing.Color]::White
+    $checkList.BorderStyle = "FixedSingle"
+    $checkList.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $form.Controls.Add($checkList)
 
-    # # 👉 Populate list, pre-check the core requested items, keep separator visible but skip during execution
-    # foreach ($label in $taskList.Keys) {
-    #     $index = $checkList.Items.Add($label)
-    #     if ($taskList[$label].Checked) { $checkList.SetItemChecked($index, $true) }
-    # }
+    # 👉 Populate list, pre-check the core requested items, keep separator visible but skip during execution
+    foreach ($label in $taskList.Keys) {
+        $index = $checkList.Items.Add($label)
+        if ($taskList[$label].Checked) { $checkList.SetItemChecked($index, $true) }
+    }
 
-    # # 👉 Select All / Select None buttons
-    # $btnSelectAll = New-Object System.Windows.Forms.Button
-    # $btnSelectAll.Text = "Select All"
-    # $btnSelectAll.Location = New-Object System.Drawing.Point(10, 520)
-    # $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
-    # $btnSelectAll.Add_Click({
-    #     for ($i = 0; $i -lt $checkList.Items.Count; $i++) {
-    #         $label = $checkList.Items[$i]
-    #         if ($taskList[$label].Fn) { $checkList.SetItemChecked($i, $true) }  # 👉 skip separator row
-    #     }
-    # })
-    # $form.Controls.Add($btnSelectAll)
+    # 👉 Select All / Select None buttons
+    $btnSelectAll = New-Object System.Windows.Forms.Button
+    $btnSelectAll.Text = "Select All"
+    $btnSelectAll.Location = New-Object System.Drawing.Point(10, 520)
+    $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
+    $btnSelectAll.Add_Click({
+        for ($i = 0; $i -lt $checkList.Items.Count; $i++) {
+            $label = $checkList.Items[$i]
+            if ($taskList[$label].Fn) { $checkList.SetItemChecked($i, $true) }  # 👉 skip separator row
+        }
+    })
+    $form.Controls.Add($btnSelectAll)
 
-    # $btnSelectNone = New-Object System.Windows.Forms.Button
-    # $btnSelectNone.Text = "Select None"
-    # $btnSelectNone.Location = New-Object System.Drawing.Point(140, 520)
-    # $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
-    # $btnSelectNone.Add_Click({
-    #     for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) }
-    # })
-    # $form.Controls.Add($btnSelectNone)
+    $btnSelectNone = New-Object System.Windows.Forms.Button
+    $btnSelectNone.Text = "Select None"
+    $btnSelectNone.Location = New-Object System.Drawing.Point(140, 520)
+    $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
+    $btnSelectNone.Add_Click({
+        for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) }
+    })
+    $form.Controls.Add($btnSelectNone)
 
-    # # 👉 Run button
-    # $btnRun = New-Object System.Windows.Forms.Button
-    # $btnRun.Text = "Run Selected Tweaks"
-    # $btnRun.Location = New-Object System.Drawing.Point(390, 520)
-    # $btnRun.Size = New-Object System.Drawing.Size(200, 34)
-    # $btnRun.BackColor = [System.Drawing.Color]::FromArgb(60,140,60)
-    # $btnRun.ForeColor = [System.Drawing.Color]::White
-    # $btnRun.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    # $form.Controls.Add($btnRun)
-    # $form.AcceptButton = $btnRun
+    # 👉 Run button
+    $btnRun = New-Object System.Windows.Forms.Button
+    $btnRun.Text = "Run Selected Tweaks"
+    $btnRun.Location = New-Object System.Drawing.Point(390, 520)
+    $btnRun.Size = New-Object System.Drawing.Size(200, 34)
+    $btnRun.BackColor = [System.Drawing.Color]::FromArgb(60,140,60)
+    $btnRun.ForeColor = [System.Drawing.Color]::White
+    $btnRun.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $form.Controls.Add($btnRun)
+    $form.AcceptButton = $btnRun
 
-    # # 👉 Cancel button
-    # $btnCancel = New-Object System.Windows.Forms.Button
-    # $btnCancel.Text = "Cancel"
-    # $btnCancel.Location = New-Object System.Drawing.Point(390, 560)
-    # $btnCancel.Size = New-Object System.Drawing.Size(200, 30)
-    # $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    # $form.Controls.Add($btnCancel)
-    # $form.CancelButton = $btnCancel
+    # 👉 Cancel button
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = "Cancel"
+    $btnCancel.Location = New-Object System.Drawing.Point(390, 560)
+    $btnCancel.Size = New-Object System.Drawing.Size(200, 30)
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.Add($btnCancel)
+    $form.CancelButton = $btnCancel
 
-    # Add-RainbowFooter -Form $form
-    # $result = $form.ShowDialog()
-    # if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
-    #     Write-Host "Cancelled by user. No changes made." -ForegroundColor DarkGray
-    #     return
-    # }
+    Add-RainbowFooter -Form $form
+    $result = $form.ShowDialog()
+    if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
+        Write-Host "Cancelled by user. No changes made." -ForegroundColor DarkGray
+        return
+    }
 
-    # $checkedLabels = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
-    $checkedLabels = $taskList.Keys | Where-Object { $taskList[$_].Fn -and $taskList[$_].Checked }
-
+    $checkedLabels = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
     if ($checkedLabels.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show("No tweaks selected.", "Info") | Out-Null
         return
@@ -1442,8 +1416,8 @@ Show-MasterMenu
 # SIG # Begin signature block
 # MIIdkQYJKoZIhvcNAQcCoIIdgjCCHX4CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBz6ItcuBAL+C5z
-# KWwFhBzdXBEd+PCrEm4eOETEoiJ6WqCCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5i8Cc0c/3GtT1
+# YNmb/4cI6UyBNvdgOeQ/WsNtXDViU6CCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
 # nkj+CleM2KE8MA0GCSqGSIb3DQEBCwUAMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQK
 # DAlNUkdBUkdTSVIxEjAQBgNVBAMMCU1SR0FSR1NJUjAeFw0yNTExMDUxMzI2MjNa
 # Fw0zMDExMDUxMzM2MjNaMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQKDAlNUkdBUkdT
@@ -1464,19 +1438,19 @@ Show-MasterMenu
 # AgEBMEkwNTELMAkGA1UEBhMCSU4xEjAQBgNVBAoMCU1SR0FSR1NJUjESMBAGA1UE
 # AwwJTVJHQVJHU0lSAhB7tTJ3UBw4nkj+CleM2KE8MA0GCWCGSAFlAwQCAQUAoIG4
 # MBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgor
-# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCRRf63l0Og9t2iEjAIjSXVXp9VGVad
-# RBilGMJVG45XSzBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
+# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDJsLnL1375Y6NnMi6uhgNjEXndqb6X
+# T9k7kIbSJpPJJDBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
 # AFUAdABpAGwAaQB0AHkAIABiAHkAIABtAHIAZwBhAHIAZwBzAGkAcjANBgkqhkiG
-# 9w0BAQEFAASCAQCbReZynV5cbmGkUkF6GLG2LwYuPVIyvMh/wd1BTXdzaXl88v3U
-# 6DtzBm8fjJsP5zXIkzl7vsDwJXGoHZLp13+eomCSyBVgdO7agaG/GR7v1vvOwF7p
-# plfnWGuCwp/iL+RWCD6f62GZoXeEA65Irkrw7/Jkq01yhWJyjPhG/l9lOQVXpDcJ
-# kDHs4R90ml3p84+xZNYeS3vNH+cuwkYpJTg5pvSpHbC7ht0AFqk6/RqV+fhXPtPF
-# q+POkB0LBQA1y2DDDxpkPGr7beIH40Fw40ikuPK3bMibQpr12oBzrk9Kz2D4NBe1
-# rrLMG3DX2Xt8vIHEdsPuufjVrnYRi69dWvDkoYIXdjCCF3IGCisGAQQBgjcDAwEx
+# 9w0BAQEFAASCAQBEy4TQqezLVbVZBejw3CZj4K9+jXgLoX62hr3e1cxTKM2CYSX8
+# ZkcxbxeRrEmc7X/xrJoQ8nLgmPqSAeZ2mSsxiLvQnOBTq4v5L/WSXdyo3lwQc8hC
+# Eo7vQFdI3xq6D/UZlT9VCHhKRD7k+6LmOtomqT7LUOiIt4cow56FpQYCsTBjV3bu
+# EMYbvgf/Z38Ksu1MMEXG+ZgaO+MzIIhHoTLJH7S1DTfr7dhNGK/jh2KIwnG4862b
+# hGoAkjT6Gyuj9m9s19AXUB2ATtG2Q9V1NNi150uv+9biIUVa3427o7fVJwjISvBP
+# KkKMhDa3fwVmrvc1G9jw3eRDACtM7YJbOEb8oYIXdjCCF3IGCisGAQQBgjcDAwEx
 # ghdiMIIXXgYJKoZIhvcNAQcCoIIXTzCCF0sCAQMxDzANBglghkgBZQMEAgEFADB3
 # BgsqhkiG9w0BCRABBKBoBGYwZAIBAQYJYIZIAYb9bAcBMDEwDQYJYIZIAWUDBAIB
-# BQAEIDIdSCNAaT5OYt8dIN0h6Hc5aqeeH49XbgskMGsUCguhAhAKAM8Bxmt0Cj7e
-# +fW28JlZGA8yMDI2MDgwMzIwNDcwMVqgghM6MIIG7TCCBNWgAwIBAgIQCoDvGEuN
+# BQAEIFZDbRhFVwagFXNY3wSBUnAA9eT4Ay9J9aArR5r5t7a3AhAPYfG6RZdkawiT
+# Ei+POW5JGA8yMDI2MDgwMzIyMTkyOVqgghM6MIIG7TCCBNWgAwIBAgIQCoDvGEuN
 # 8QWC0cR2p5V0aDANBgkqhkiG9w0BAQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UE
 # ChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQg
 # VGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAw
@@ -1583,19 +1557,19 @@ Show-MasterMenu
 # Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
 # bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgw
 # DQYJYIZIAWUDBAIBBQCggdEwGgYJKoZIhvcNAQkDMQ0GCyqGSIb3DQEJEAEEMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA4MDMyMDQ3MDFaMCsGCyqGSIb3DQEJEAIMMRwwGjAY
-# MBYEFN1iMKyGCi0wa9o4sWh5UjAH+0F+MC8GCSqGSIb3DQEJBDEiBCDSyBPpWrz5
-# VuoNonUleiNocBQsNfY30GC7dNof61dHRzA3BgsqhkiG9w0BCRACLzEoMCYwJDAi
+# CSqGSIb3DQEJBTEPFw0yNjA4MDMyMjE5MjlaMCsGCyqGSIb3DQEJEAIMMRwwGjAY
+# MBYEFN1iMKyGCi0wa9o4sWh5UjAH+0F+MC8GCSqGSIb3DQEJBDEiBCDZ27de8hgB
+# b0oxhV8/CfNHE0TYRjQgblWgDRCcDaoTjDA3BgsqhkiG9w0BCRACLzEoMCYwJDAi
 # BCBKoD+iLNdchMVck4+CjmdrnK7Ksz/jbSaaozTxRhEKMzANBgkqhkiG9w0BAQEF
-# AASCAgAK2MBcDpMbgAo3kWGpZQG8GJgqZN3O0OK75qCmtIqQoc8K+bPudjaKXuhT
-# P4wx45D3Xppm+xknUcDwUWQMj8hyub3GBTKMH8A1nPRdV8c5BubXv3768WzXeVkU
-# fhXahvJDzZOUgOf2460CMRgvi9lAsgwXBU+eE9ag0aCAaQvM9y48u9Sh0+FJOjhA
-# aWcugfXCcKQwyoXAJ0pmKIISyotym5bL5oPu+e3iBaO5h1+QDQhr9RR5C1b4fjOc
-# 3SRzt1Fo86cLNIAsQ8shmwmv40ieJ8fLvaB4KlJm9ikOSg5j77MTopH0WBt9zARK
-# ad6N6qZyFyDTq3elPAAz7sgh+tCbK/+PF4EplPW/7SpgprCK0ZBU/Jlnk75pau46
-# Ak/MmWL1lgjn4L1NBkBPIwZogLIsSlGTOpQrkzHgCUzBnt373PUL+FnXrPbyrnoG
-# pIEXmt/9W6Hy+Gj4P/QJEHdKIeS1CmSVcHxXtvfDjM/u2gnR2sgYL9mFjZm5SMeK
-# 6KdV7ElS+gPYqvVPOTvkBA7gqo8JwHuAGQsdrMQ57H7yy3TLcuWjJYDUMH6XkvWp
-# 4ii9V8nNu1VNkEEy1NsJit9KDvZj0fiOMLcMyhaYibCChbrQh8TvGckWygUGjLTM
-# Pm8/01rbWH7/mrqEGOF/o7ANgstsaMPDHXQkRmQwba83QQm8AQ==
+# AASCAgDDm29KI9fU1Eh8vwvvTI3k/Ffm1afCzx4UliUX4zgAOS35zV7+x9GVkRmT
+# XHHhjL8QDhHLmNRm7dOl9MvXRMe55Vawd7Y9hJnqZsAxVJAv4o4ABQh8vfBsganN
+# sV6dlYopE6LYHoJ5uvgBnpIeiDhaeqNDUREO/IuZ4X5IXC6I3uAHwGqmC+8dOxs6
+# YfI9+qJZze+oC3391JDywwAgi9JBuBOXo5uSdcEN6g5wdYsQ9bjpmGD0IfWxCTa0
+# u73ShWs7uu9lg2VTJPJf49Q6xSbvrHCJE+WIEVf4aqxvnMw23be3MU+ogUX+ddYY
+# q8EVo5Fyk9D0Jo9FOKBph9fGswXwNeMCsacJZ0cX+Lw6Ldo8LBArSvh7C3yJiG4G
+# OqWNs09BZb+e03u0typ1KW7ZG1vd5NU38jkgCqdDU8NiPkqH30i1GzjbTuGfcyM7
+# 0gP4PDZpriYcrxHKU+/H2cQGl7o1r/cctfzSh2v7HXMHS34RfL5HgjVmbgwit4ra
+# 2Y37uLd6usb2rOZs/4FgUa+JEPKnVhTQ3SbsFJZEJEx49H+RcLLwe0Lz25MQbtkQ
+# N72J1nNeLVLAJLEhIj64xd/d25snPB2nTI+G0PsfsWTEUK2X42ktcI/ECBFA/K80
+# wjeacuNtsYeGndoOCpO4rjrZWkCgBhCH16f+BfgVnn//ovgGMQ==
 # SIG # End signature block

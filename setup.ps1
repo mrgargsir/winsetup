@@ -49,7 +49,6 @@ function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
     }
 }
 
-
 # 👉 Global OS detection - used throughout the script to skip features that don't exist on older Windows
 $script:OSVersion = [System.Environment]::OSVersion.Version
 $script:IsWin7    = ($OSVersion.Major -eq 6 -and $OSVersion.Minor -eq 1)          # 👉 Windows 7 = 6.1
@@ -192,7 +191,6 @@ $teamsMwi = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Un
 foreach ($t in $teamsMwi) {
     Write-Host "Removing Teams Machine-Wide Installer..." -ForegroundColor DarkGray
     Start-Process msiexec.exe -ArgumentList "/x $($t.PSChildName) /qn /norestart" -Wait
-
 }
 
     Write-Host "[+] Bloatware removal complete." -ForegroundColor Green
@@ -249,8 +247,8 @@ function Remove-OEMBloat {
     $commonBloat = @(
         "Waves MaxxAudio","Waves Audio","MaxxAudio","Dolby Access","Dolby Audio",
         "McAfee","Norton Security","WildTangent","Booking.com","Amazon Assistant",
-        "Realtek Audio Console", "Gaming Services","Microsoft GameInput","GameInput",
-        "Intel Graphics Command Center", "Tesseract-OCR","NetMirror"
+        "Realtek Audio Console","Gaming Services","Microsoft GameInput","GameInput","Intel Graphics Command Center",
+    "Tesseract-OCR","NetMirror"
     )
 
     $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
@@ -474,7 +472,7 @@ function Disable-StartupItems {
     "teamviewer","grammarly",
     "dopdf","printershare","hpwuschd","hp software update","lenovovantage","sunjavaupdatesched",
     "wd_spsocketserver","wd_stdcertm","wondershare","netsetman","camo studio","intel.*graphics command center",
-    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat", "waves"
+    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat" , "waves"
 )
 
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
@@ -1279,9 +1277,9 @@ function Show-MasterMenu {
         "Tune Search Indexer and SysMain"                                      = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
         "Optimize Background Services + Notifications + Clipboard" = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
         "Disable Sleep When Plugged In" = @{ Fn = "Set-PowerSleepNever"; Checked = $true }
+        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Remove OEM Bloat (Dell/HP/Lenovo)" = @{ Fn = "Remove-OEMBloat"; Checked = $true }
         "Disable Windows Recall"           = @{ Fn = "Disable-Recall"; Checked = $true }
-        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Check for Multiple Antivirus (warning prompt)"                        = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
         "Enable Defender + Update Signatures"                                  = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
         "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }
@@ -1371,8 +1369,6 @@ function Show-MasterMenu {
     }
 
     $checkedLabels = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
-
-    
     if ($checkedLabels.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show("No tweaks selected.", "Info") | Out-Null
         return
@@ -1420,8 +1416,8 @@ Show-MasterMenu
 # SIG # Begin signature block
 # MIIdkgYJKoZIhvcNAQcCoIIdgzCCHX8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzV/9ZxDlQAI6W
-# Ts7EWrkItVkwxcbbsJmbSmhg+o5SkaCCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5i8Cc0c/3GtT1
+# YNmb/4cI6UyBNvdgOeQ/WsNtXDViU6CCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
 # nkj+CleM2KE8MA0GCSqGSIb3DQEBCwUAMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQK
 # DAlNUkdBUkdTSVIxEjAQBgNVBAMMCU1SR0FSR1NJUjAeFw0yNTExMDUxMzI2MjNa
 # Fw0zMDExMDUxMzM2MjNaMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQKDAlNUkdBUkdT
@@ -1442,19 +1438,19 @@ Show-MasterMenu
 # AgEBMEkwNTELMAkGA1UEBhMCSU4xEjAQBgNVBAoMCU1SR0FSR1NJUjESMBAGA1UE
 # AwwJTVJHQVJHU0lSAhB7tTJ3UBw4nkj+CleM2KE8MA0GCWCGSAFlAwQCAQUAoIG4
 # MBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgor
-# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB6/2Hb8BI9VgoKPotcJQ/SM4C4E2D5
-# t+zTM7atp8J3CzBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
+# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDJsLnL1375Y6NnMi6uhgNjEXndqb6X
+# T9k7kIbSJpPJJDBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
 # AFUAdABpAGwAaQB0AHkAIABiAHkAIABtAHIAZwBhAHIAZwBzAGkAcjANBgkqhkiG
-# 9w0BAQEFAASCAQCJ5R/V+kcvqJDw8BWohLnXfPsTyJeAgx+C0jxQ9DVFhBu0TbEL
-# aHR9vDa+5DjiEkUjByZ6RSI0fcOJlepquaZlAMQTUFCRRSd7acs8DD9Fz55yyqS9
-# sLpNG/CYlNuiAY6xKbbgwthAgmrlO2zXJ6nZr7kqUE5VIm2RO4fD81lcoKeUz1pU
-# PwyeV3FvigbBIy+Iw3HzkzKKYRGk5FxDhemKYDnXGo6ISK9obEC6YbZqXs5g2CpH
-# sE53/fVRiLrub2xwM/RGjp4mzTZSCH+AcMGjGDOwKC6we8LsoUa57vdRUFihaF2O
-# 94L+5iXOLZlArYZOwK1vAWvX9/I6HYkuuWTaoYIXdzCCF3MGCisGAQQBgjcDAwEx
+# 9w0BAQEFAASCAQBEy4TQqezLVbVZBejw3CZj4K9+jXgLoX62hr3e1cxTKM2CYSX8
+# ZkcxbxeRrEmc7X/xrJoQ8nLgmPqSAeZ2mSsxiLvQnOBTq4v5L/WSXdyo3lwQc8hC
+# Eo7vQFdI3xq6D/UZlT9VCHhKRD7k+6LmOtomqT7LUOiIt4cow56FpQYCsTBjV3bu
+# EMYbvgf/Z38Ksu1MMEXG+ZgaO+MzIIhHoTLJH7S1DTfr7dhNGK/jh2KIwnG4862b
+# hGoAkjT6Gyuj9m9s19AXUB2ATtG2Q9V1NNi150uv+9biIUVa3427o7fVJwjISvBP
+# KkKMhDa3fwVmrvc1G9jw3eRDACtM7YJbOEb8oYIXdzCCF3MGCisGAQQBgjcDAwEx
 # ghdjMIIXXwYJKoZIhvcNAQcCoIIXUDCCF0wCAQMxDzANBglghkgBZQMEAgEFADB4
 # BgsqhkiG9w0BCRABBKBpBGcwZQIBAQYJYIZIAYb9bAcBMDEwDQYJYIZIAWUDBAIB
-# BQAEIJFFTy1jEHAuHG2mT+j87wpyj+P7iqHowuiMdmYmYvOKAhEArZhNa9uA6SXs
-# q1s5St6P0BgPMjAyNjA4MDMyMDQ3MDBaoIITOjCCBu0wggTVoAMCAQICEAqA7xhL
+# BQAEIFZDbRhFVwagFXNY3wSBUnAA9eT4Ay9J9aArR5r5t7a3AhEAz4X2D/NmeNYc
+# 40+O1belZRgPMjAyNjA4MDMyMjE5MjhaoIITOjCCBu0wggTVoAMCAQICEAqA7xhL
 # jfEFgtHEdqeVdGgwDQYJKoZIhvcNAQELBQAwaTELMAkGA1UEBhMCVVMxFzAVBgNV
 # BAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0
 # IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTAeFw0yNTA2MDQw
@@ -1561,19 +1557,19 @@ Show-MasterMenu
 # aUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0
 # YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExAhAKgO8YS43xBYLRxHanlXRo
 # MA0GCWCGSAFlAwQCAQUAoIHRMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAc
-# BgkqhkiG9w0BCQUxDxcNMjYwODAzMjA0NzAwWjArBgsqhkiG9w0BCRACDDEcMBow
-# GDAWBBTdYjCshgotMGvaOLFoeVIwB/tBfjAvBgkqhkiG9w0BCQQxIgQgkvvBpnmM
-# o6D0JeiS+2Teh+K4E5i7gb76T8GLM0gM7GUwNwYLKoZIhvcNAQkQAi8xKDAmMCQw
+# BgkqhkiG9w0BCQUxDxcNMjYwODAzMjIxOTI4WjArBgsqhkiG9w0BCRACDDEcMBow
+# GDAWBBTdYjCshgotMGvaOLFoeVIwB/tBfjAvBgkqhkiG9w0BCQQxIgQgpiBTJqNA
+# a2/nSZUBjpVVZpdKtp5IUL1iSMg0Bz2frK8wNwYLKoZIhvcNAQkQAi8xKDAmMCQw
 # IgQgSqA/oizXXITFXJOPgo5na5yuyrM/420mmqM08UYRCjMwDQYJKoZIhvcNAQEB
-# BQAEggIAxu7moqllhVn9RgIRPUdbmP8oYb+ul+sP7Lb9G9PiT19f2KDoluelszbf
-# PSw2M8xUUw9vIaDutMgh9LBwQtaVv63EdvGYj3rFBrQ3nibVomWzIFwmBKbf4jub
-# xpP46yXq0Eqfp8hFzhDDB62UnVP5e+2yli5r1JI34rhpkRAauuwZZTrp8ndCwpVr
-# /42MO8bPg67rN9qSPMryfQpi7KO5chr6nLQo+MmV7q/iRkEUV/r3ws4xtNYBKLYK
-# RIDkvtd6ru/plI1RczJFQ9lrs/T8psRiSe59FTuqnZt3dmTewbC4B5C1R9lhsTPP
-# pyhNoDL6anHbBpG+RTkTCEiJkG3/eAlC8jxE4IJD+ClBDA/hjQLevnZF1xypYJYF
-# iTbWLezMuimJqjaFkgHqryHZhCg50LmxIsjZLEZOQotees/8wzWjcBWg308psiyg
-# Go6TbcYwbmIvxcdE48+IzIfn4adaWT2If4+oIMEcxxopBkk9Lz22BFtc8JcUeAxC
-# XqPivU2hQ7YdqnMMsAO4/uMzL4+jp8mcp+NcO5/jBCaUfC28zhGgsbl6IXhicNxv
-# C6oAqDYix1iNpTIhMj3Ynpt89LG5DAcCyCl0izp1Wx+6tAmAL6SjOwW7XicIGxeM
-# 9jrLTlNp6+dw5bws9MUfg0KFfXNbVWa04sIrDu91ZXzjVxsRMDo=
+# BQAEggIAJ437tsVEDrhv5GsDhU6XVUjzFN8z3sfoqxdjp3DIn7qGCKNNLJ5VXxkD
+# EmAGsKiEF1HuaqaGJX095D7M5T9GcQUkcRGhx5cd+/TETDNPWGwYNYKX1JRMPwEy
+# nTlYgapGO1XVqLZ0ex11D1beYtnDfL3Bkwg4LGdEPjqxpg+Vea7HRAepBadBfCu3
+# muo7M5/aItMLzjNfzbcO+vi/GUGa3Ur5jpq72UoI64PxUluonkac16WNQ7Y89ual
+# HUzl8/uGzOw5yWk/V0cRCqPgT23ikW2/xdhbhH/PpvUfleKbfKD2HNSDRHoq/+rY
+# KxY+U7chN9rpDUK9xM2/qnW/zRtLMmxXHIuHo9hek8jdwLNvJMmAIwJl2qyVjBHj
+# cG0/W7R1N9Xt2sGMYupkG2PtZppPXAEh7F0DW6bw7w2/owRihK3H3Yjc3GWMcr8v
+# EiUGG6LXU21yfhIPE1Ud8iUTnb63/CAjdD7+o/R7y/JPMouERMoHi8omvn5yhCSU
+# LlbfN/kFlPCDPLT2Hb/KtlvtqR1tjcyB0RpiQ+ThdD5XlDpgbrxJYcpLm7s6b5sS
+# fyBs1BbVgHIjCGU+V7/VPcc8bfP6efg+YWbIcvebjsm9sf0eGWctfTh+In2cKQ8U
+# 25YVjOyk5x4kumtx4PsQ9pyk8K07IvaSKZ4b/Zhj/rZfTHZXqU0=
 # SIG # End signature block
