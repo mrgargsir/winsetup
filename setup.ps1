@@ -20,7 +20,6 @@ if (-not $isAdmin) {
         } else {
             # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
             $elevateCommand = "irm https://mrgargsir.github.io/winsetup/setup.ps1 | iex"
-            #$elevateCommand = "irm https://mrgargsir.github.io/winsetup/autosetup.ps1 | iex"
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
         }
     } catch {
@@ -50,27 +49,6 @@ function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
     }
 }
 
-function Start-ProcessWithTimeout {
-    param(
-        [string]$FilePath,
-        [string]$ArgumentList,
-        [int]$TimeoutSeconds = 120
-    )
-    try {
-        $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru -ErrorAction Stop
-        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-            Write-Host "  Timed out after $TimeoutSeconds s - killing $FilePath (pid $($proc.Id)) and moving on..." -ForegroundColor Red
-            try {
-                # kill the process tree, not just the parent, in case it spawned a child installer
-                Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue |
-                    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            } catch {}
-        }
-    } catch {
-        Write-Host "  Failed to start $FilePath - $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-}
 
 # 👉 Global OS detection - used throughout the script to skip features that don't exist on older Windows
 $script:OSVersion = [System.Environment]::OSVersion.Version
@@ -213,7 +191,7 @@ $teamsMwi = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Un
     Where-Object { $_.DisplayName -match "Teams Machine-Wide Installer" }
 foreach ($t in $teamsMwi) {
     Write-Host "Removing Teams Machine-Wide Installer..." -ForegroundColor DarkGray
-    Start-ProcessWithTimeout -FilePath "msiexec.exe" -ArgumentList "/x $($t.PSChildName) /qn /norestart" -TimeoutSeconds 120
+    Start-Process msiexec.exe -ArgumentList "/x $($t.PSChildName) /qn /norestart" -Wait
 
 }
 
@@ -285,9 +263,9 @@ function Remove-OEMBloat {
             foreach ($m in $match) {
                 Write-Host "Removing: $($m.DisplayName)" -ForegroundColor DarkGray
                 if ($m.UninstallString -match "msiexec") {
-                    Start-ProcessWithTimeout -FilePath "msiexec.exe" -ArgumentList "/x $($m.PSChildName) /qn /norestart" -TimeoutSeconds 120
+                    Start-Process msiexec.exe -ArgumentList "/x $($m.PSChildName) /qn /norestart" -Wait
                 } else {
-                    Start-ProcessWithTimeout -FilePath "cmd.exe" -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -TimeoutSeconds 120
+                    Start-Process cmd.exe -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -Wait -ErrorAction SilentlyContinue
                 }
             }
         }
@@ -1444,8 +1422,8 @@ Show-MasterMenu
 # SIG # Begin signature block
 # MIIdkgYJKoZIhvcNAQcCoIIdgzCCHX8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAz60i7Ac6mHeyt
-# /0E+eDvIhmUK0waaIHPS7oXCHVtFnaCCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzV/9ZxDlQAI6W
+# Ts7EWrkItVkwxcbbsJmbSmhg+o5SkaCCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
 # nkj+CleM2KE8MA0GCSqGSIb3DQEBCwUAMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQK
 # DAlNUkdBUkdTSVIxEjAQBgNVBAMMCU1SR0FSR1NJUjAeFw0yNTExMDUxMzI2MjNa
 # Fw0zMDExMDUxMzM2MjNaMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQKDAlNUkdBUkdT
@@ -1466,19 +1444,19 @@ Show-MasterMenu
 # AgEBMEkwNTELMAkGA1UEBhMCSU4xEjAQBgNVBAoMCU1SR0FSR1NJUjESMBAGA1UE
 # AwwJTVJHQVJHU0lSAhB7tTJ3UBw4nkj+CleM2KE8MA0GCWCGSAFlAwQCAQUAoIG4
 # MBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgor
-# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBs1BJ4bPhMyIG9oyLQEUQsF2KqfZy6
-# Nn95RgpJmc+CzTBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
+# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB6/2Hb8BI9VgoKPotcJQ/SM4C4E2D5
+# t+zTM7atp8J3CzBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
 # AFUAdABpAGwAaQB0AHkAIABiAHkAIABtAHIAZwBhAHIAZwBzAGkAcjANBgkqhkiG
-# 9w0BAQEFAASCAQAnjjPI266XnHzMBbyZYN+v9cRw4iu4bQFCMnql1rqGYF9MU2LP
-# mKYuU//qOQRZxTIf3opMr7d6tUBBSD/dhOWW9j7HWgMAZs4OD0E1CDeXVKPOVXGU
-# xmnIIOfRTEvStpr+OXpB6zWFyuOZPcMHujTH7Mw01PTeE/45dhnGHewFq7I0dceS
-# eKAMRf7dEtGCUDqq8ll9PuCgAuhHCVBAdW6/3Fuaf0w28fDu/lFQHJij3YMWgCH1
-# i5B/ht0ND9Nu8hL4qM0JQb6DQ0Oo86uAMrs5fuRxpk8FpaKWFs3XugkAfuKTQplM
-# jms+WYKVdzli2O+ZAdTUI3EWtm1Y3jFyR8rpoYIXdzCCF3MGCisGAQQBgjcDAwEx
+# 9w0BAQEFAASCAQCJ5R/V+kcvqJDw8BWohLnXfPsTyJeAgx+C0jxQ9DVFhBu0TbEL
+# aHR9vDa+5DjiEkUjByZ6RSI0fcOJlepquaZlAMQTUFCRRSd7acs8DD9Fz55yyqS9
+# sLpNG/CYlNuiAY6xKbbgwthAgmrlO2zXJ6nZr7kqUE5VIm2RO4fD81lcoKeUz1pU
+# PwyeV3FvigbBIy+Iw3HzkzKKYRGk5FxDhemKYDnXGo6ISK9obEC6YbZqXs5g2CpH
+# sE53/fVRiLrub2xwM/RGjp4mzTZSCH+AcMGjGDOwKC6we8LsoUa57vdRUFihaF2O
+# 94L+5iXOLZlArYZOwK1vAWvX9/I6HYkuuWTaoYIXdzCCF3MGCisGAQQBgjcDAwEx
 # ghdjMIIXXwYJKoZIhvcNAQcCoIIXUDCCF0wCAQMxDzANBglghkgBZQMEAgEFADB4
 # BgsqhkiG9w0BCRABBKBpBGcwZQIBAQYJYIZIAYb9bAcBMDEwDQYJYIZIAWUDBAIB
-# BQAEIAsirhfJWaur48OPsC9jpne5ieDQw7AdruvQTwSc2m0QAhEA00x5+Rg4GBmH
-# Ts21VRMgcBgPMjAyNjA4MDMyMDE3NTVaoIITOjCCBu0wggTVoAMCAQICEAqA7xhL
+# BQAEIJFFTy1jEHAuHG2mT+j87wpyj+P7iqHowuiMdmYmYvOKAhEArZhNa9uA6SXs
+# q1s5St6P0BgPMjAyNjA4MDMyMDQ3MDBaoIITOjCCBu0wggTVoAMCAQICEAqA7xhL
 # jfEFgtHEdqeVdGgwDQYJKoZIhvcNAQELBQAwaTELMAkGA1UEBhMCVVMxFzAVBgNV
 # BAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0
 # IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTAeFw0yNTA2MDQw
@@ -1585,19 +1563,19 @@ Show-MasterMenu
 # aUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0
 # YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExAhAKgO8YS43xBYLRxHanlXRo
 # MA0GCWCGSAFlAwQCAQUAoIHRMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAc
-# BgkqhkiG9w0BCQUxDxcNMjYwODAzMjAxNzU1WjArBgsqhkiG9w0BCRACDDEcMBow
-# GDAWBBTdYjCshgotMGvaOLFoeVIwB/tBfjAvBgkqhkiG9w0BCQQxIgQg5q6ZCnQ1
-# NgUYSd57tDgILYBAezILpqgxYp05V2fiU40wNwYLKoZIhvcNAQkQAi8xKDAmMCQw
+# BgkqhkiG9w0BCQUxDxcNMjYwODAzMjA0NzAwWjArBgsqhkiG9w0BCRACDDEcMBow
+# GDAWBBTdYjCshgotMGvaOLFoeVIwB/tBfjAvBgkqhkiG9w0BCQQxIgQgkvvBpnmM
+# o6D0JeiS+2Teh+K4E5i7gb76T8GLM0gM7GUwNwYLKoZIhvcNAQkQAi8xKDAmMCQw
 # IgQgSqA/oizXXITFXJOPgo5na5yuyrM/420mmqM08UYRCjMwDQYJKoZIhvcNAQEB
-# BQAEggIAYR9OlRJtPZllyaBRUIEmy+AWNIC3G8VqH9oeKagYFlsx2S5hJidZIIr+
-# EOpe1N9zNZEruqLTKYvtGBL9mH8E64irAgxqzEhzrI/PZAVbh4pTBAh2fsLVkBjA
-# ASrdj8IbP9ad6mVIlEb+Ky8i7HJoGZJ+1f4rA2q5L/cqQn3oz4JP0eqH42Og9SgV
-# NX8MSpgzeuLKUIG2BEilG2E+TtsobSib4xQQa4yV4njnuDlTuTthI3npslB8xOOH
-# 71wKQZg/fn01kb9OR9EGhl4YTtmQnzvMkWYioh9nFB9wvb7FEOuBrmLIWvHlEZ1L
-# YncS8IyPI2ES1RC6llRTvS3ODk4uJAbsbZo8u5AvBObpA/Q5cZUIYl5N/TJoXT3+
-# K2CueY30wfF8PMe1GnLoVJErPvwc7LEM7T3txZLRvWp5W+0TCvfrWT/XYNngXSMA
-# w1WsV1TbHxTAnuU1fBjTj4kiACX3sVFOnGnc8q6A2ZACXvvDrf3P4aB06Cl7cLby
-# 1JLniUBMb1rJSAGCAugCE0ZUgVmdsql1plsXubdf95lpbrHj5/Q8gyj7JpW25JsN
-# B8IGIEPHzZpe28TxLbtS6DaXQEKDYMmvh4QHhkAgJmvWHmBKJBlzMvGkrMh4YdQV
-# T38GqcNoPd/3WQ7PuuTXEqbf1sKjoIbk1KUaUhOnNl80//3IMEQ=
+# BQAEggIAxu7moqllhVn9RgIRPUdbmP8oYb+ul+sP7Lb9G9PiT19f2KDoluelszbf
+# PSw2M8xUUw9vIaDutMgh9LBwQtaVv63EdvGYj3rFBrQ3nibVomWzIFwmBKbf4jub
+# xpP46yXq0Eqfp8hFzhDDB62UnVP5e+2yli5r1JI34rhpkRAauuwZZTrp8ndCwpVr
+# /42MO8bPg67rN9qSPMryfQpi7KO5chr6nLQo+MmV7q/iRkEUV/r3ws4xtNYBKLYK
+# RIDkvtd6ru/plI1RczJFQ9lrs/T8psRiSe59FTuqnZt3dmTewbC4B5C1R9lhsTPP
+# pyhNoDL6anHbBpG+RTkTCEiJkG3/eAlC8jxE4IJD+ClBDA/hjQLevnZF1xypYJYF
+# iTbWLezMuimJqjaFkgHqryHZhCg50LmxIsjZLEZOQotees/8wzWjcBWg308psiyg
+# Go6TbcYwbmIvxcdE48+IzIfn4adaWT2If4+oIMEcxxopBkk9Lz22BFtc8JcUeAxC
+# XqPivU2hQ7YdqnMMsAO4/uMzL4+jp8mcp+NcO5/jBCaUfC28zhGgsbl6IXhicNxv
+# C6oAqDYix1iNpTIhMj3Ynpt89LG5DAcCyCl0izp1Wx+6tAmAL6SjOwW7XicIGxeM
+# 9jrLTlNp6+dw5bws9MUfg0KFfXNbVWa04sIrDu91ZXzjVxsRMDo=
 # SIG # End signature block
