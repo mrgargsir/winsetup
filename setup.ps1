@@ -1372,8 +1372,6 @@ function Show-MasterMenu {
 
     $checkedLabels = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
 
-    # disable ui and enable below to make automated testing easier (no user interaction)
-    #$checkedLabels = $taskList.Keys | Where-Object { $taskList[$_].Fn -and $taskList[$_].Checked }
     
     if ($checkedLabels.Count -eq 0) {
         [System.Windows.Forms.MessageBox]::Show("No tweaks selected.", "Info") | Out-Null
