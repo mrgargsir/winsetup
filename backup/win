@@ -237,7 +237,7 @@ function Remove-OEMBloat {
                       "Dell Sync","Dell Peripheral Manager","Dell Pair","Dell Mobile Connect","Dell Power Manager",
                       "Dell Cinema","Dell Product Registration","Dell Watchdog Timer","MyDell","Dell Core Services",
                       "Dell SupportAssist Remediation","Dell SupportAssist OS Recovery","Dell Trusted Device Agent",
-                      "Dell Command | Update","Dell Display Manager")
+                      "Dell Command | Update","Dell Display Manager","Dell Connected Service Delivery")
         "HP"      = @("HP Support Assistant","HP JumpStart","HP Documentation","HPSA Service","HP System Info HSA Service")
         "Lenovo"  = @("Lenovo Vantage","Lenovo Utility","Lenovo Companion","Lenovo App Explorer")
     }
@@ -247,7 +247,8 @@ function Remove-OEMBloat {
     $commonBloat = @(
         "Waves MaxxAudio","Waves Audio","MaxxAudio","Dolby Access","Dolby Audio",
         "McAfee","Norton Security","WildTangent","Booking.com","Amazon Assistant",
-        "Realtek Audio Console"
+        "Realtek Audio Console","Gaming Services","Microsoft GameInput","GameInput","Intel Graphics Command Center",
+    "Tesseract-OCR","NetMirror"
     )
 
     $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
@@ -338,7 +339,7 @@ function Show-InstalledSoftware {
     $software = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.UninstallString } | Select-Object DisplayName, UninstallString, PSChildName | Sort-Object DisplayName -Unique
 
     # 👉 Always-hidden keywords - these never appear in the uninstall picker
-    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64","rustdesk", "scan to", "winrar", "workflow manager", "google chrome" )
+    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64","rustdesk", "scan to", "winrar", "workflow manager", "google chrome", "windows app runtime" )
 
     # 👉 Filter out any DisplayName containing a hidden keyword (case-insensitive)
     $software = $software | Where-Object {
@@ -471,7 +472,7 @@ function Disable-StartupItems {
     "teamviewer","grammarly",
     "dopdf","printershare","hpwuschd","hp software update","lenovovantage","sunjavaupdatesched",
     "wd_spsocketserver","wd_stdcertm","wondershare","netsetman","camo studio","intel.*graphics command center",
-    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat" 
+    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat" , "waves"
 )
 
     $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
@@ -1276,9 +1277,9 @@ function Show-MasterMenu {
         "Tune Search Indexer and SysMain"                                      = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
         "Optimize Background Services + Notifications + Clipboard" = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
         "Disable Sleep When Plugged In" = @{ Fn = "Set-PowerSleepNever"; Checked = $true }
+        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Remove OEM Bloat (Dell/HP/Lenovo)" = @{ Fn = "Remove-OEMBloat"; Checked = $true }
         "Disable Windows Recall"           = @{ Fn = "Disable-Recall"; Checked = $true }
-        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Check for Multiple Antivirus (warning prompt)"                        = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
         "Enable Defender + Update Signatures"                                  = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
         "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }

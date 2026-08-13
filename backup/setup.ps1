@@ -17,12 +17,14 @@ if (-not $isAdmin) {
         if ($PSCommandPath) {
             # 👉 Script was run from a saved .ps1 file - relaunch that same file elevated
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs -ErrorAction Stop
-        } else {
+        }
+        else {
             # 👉 Script was run via "irm ... | iex" (no file on disk) - relaunch by re-running the same one-liner elevated
             $elevateCommand = "irm https://mrgargsir.github.io/winsetup/setup.ps1 | iex"
             Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$elevateCommand`"" -Verb RunAs -ErrorAction Stop
         }
-    } catch {
+    }
+    catch {
         # 👉 User clicked "No" on the UAC prompt, or elevation otherwise failed
         Write-Host "[-] Elevation was cancelled or failed. This script requires Administrator privileges to run." -ForegroundColor Red
         Read-Host "Press Enter to exit"
@@ -44,16 +46,17 @@ Add-Type -AssemblyName System.Drawing
 function Set-RegValueSafe($path, $name, $value, $type = "DWord") {
     try {
         Set-ItemProperty -Path $path -Name $name -Value $value -Type $type -Force -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Host "  Skipped '$name' (protected by this Windows build, no reliable workaround)" -ForegroundColor Yellow
     }
 }
 
 # 👉 Global OS detection - used throughout the script to skip features that don't exist on older Windows
 $script:OSVersion = [System.Environment]::OSVersion.Version
-$script:IsWin7    = ($OSVersion.Major -eq 6 -and $OSVersion.Minor -eq 1)          # 👉 Windows 7 = 6.1
+$script:IsWin7 = ($OSVersion.Major -eq 6 -and $OSVersion.Minor -eq 1)          # 👉 Windows 7 = 6.1
 $script:IsWin81OrOlder = ($OSVersion.Major -lt 10)                                # 👉 covers 7, 8, 8.1
-$script:IsWin11   = ($OSVersion.Major -eq 10 -and $OSVersion.Build -ge 22000)
+$script:IsWin11 = ($OSVersion.Major -eq 10 -and $OSVersion.Build -ge 22000)
 
 # 👉 Reusable animated rainbow footer - added to every GUI window for consistent branding
 function Add-RainbowFooter {
@@ -61,13 +64,13 @@ function Add-RainbowFooter {
 
     $footerText = "Developed by @MRGARGSIR"
     $colors = @(
-        [System.Drawing.Color]::FromArgb(255,80,80),
-        [System.Drawing.Color]::FromArgb(255,180,60),
-        [System.Drawing.Color]::FromArgb(255,230,60),
-        [System.Drawing.Color]::FromArgb(100,220,100),
-        [System.Drawing.Color]::FromArgb(80,180,255),
-        [System.Drawing.Color]::FromArgb(150,100,255),
-        [System.Drawing.Color]::FromArgb(255,100,200)
+        [System.Drawing.Color]::FromArgb(255, 80, 80),
+        [System.Drawing.Color]::FromArgb(255, 180, 60),
+        [System.Drawing.Color]::FromArgb(255, 230, 60),
+        [System.Drawing.Color]::FromArgb(100, 220, 100),
+        [System.Drawing.Color]::FromArgb(80, 180, 255),
+        [System.Drawing.Color]::FromArgb(150, 100, 255),
+        [System.Drawing.Color]::FromArgb(255, 100, 200)
     )
 
     $charWidth = 12
@@ -78,7 +81,7 @@ function Add-RainbowFooter {
     $x = $startX
     for ($i = 0; $i -lt $footerText.Length; $i++) {
         $lbl = New-Object System.Windows.Forms.Label
-        $lbl.Text = $footerText.Substring($i,1)
+        $lbl.Text = $footerText.Substring($i, 1)
         $lbl.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
         $lbl.AutoSize = $true
         $lbl.Location = New-Object System.Drawing.Point($x, $y)
@@ -93,14 +96,15 @@ function Add-RainbowFooter {
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 150
     $timer.Add_Tick({
-        $offset++
-        for ($i = 0; $i -lt $labels.Count; $i++) {
-            $labels[$i].ForeColor = $colors[($i + $offset) % $colors.Count]
-        }
-    }.GetNewClosure())
+            $offset++
+            for ($i = 0; $i -lt $labels.Count; $i++) {
+                $labels[$i].ForeColor = $colors[($i + $offset) % $colors.Count]
+            }
+        }.GetNewClosure())
     $timer.Start()
     $Form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() }.GetNewClosure()) 
 }
+
 
 #---------------- SECTION 0: AUTO-PARTITION ----------------
 function New-DataPartitionFromFreeSpace {
@@ -117,11 +121,14 @@ function New-DataPartitionFromFreeSpace {
         $tierLabel = ""
         if ($freeGB -ge 30 -and $freeGB -lt 50) {
             $shrinkPct = 0.20; $tierLabel = "30-50 GB tier"
-        } elseif ($freeGB -ge 50 -and $freeGB -lt 70) {
+        }
+        elseif ($freeGB -ge 50 -and $freeGB -lt 70) {
             $shrinkPct = 0.30; $tierLabel = "50-70 GB tier"
-        } elseif ($freeGB -ge 70 -and $freeGB -lt 100) {
+        }
+        elseif ($freeGB -ge 70 -and $freeGB -lt 100) {
             $shrinkPct = 0.40; $tierLabel = "70-100 GB tier"
-        } elseif ($freeGB -ge 100) {
+        }
+        elseif ($freeGB -ge 100) {
             $shrinkPct = 0.50; $tierLabel = "100+ GB tier"
         }
 
@@ -139,10 +146,12 @@ function New-DataPartitionFromFreeSpace {
             Format-Volume -Partition $newPartition -FileSystem NTFS -NewFileSystemLabel "Data" -Confirm:$false
 
             Write-Host "D: drive created successfully ($shrinkGB GB)." -ForegroundColor Green
-        } else {
+        }
+        else {
             Write-Host "Only $freeGB GB free (need at least 30 GB) - skipping partition." -ForegroundColor Yellow
         }
-    } else {
+    }
+    else {
         Write-Host "Multiple partitions already exist or C: not sole volume - skipping." -ForegroundColor Yellow
     }
 }
@@ -156,24 +165,25 @@ function Remove-WindowsBloat {
         return
     }
 
-    $KeepApps = @("Microsoft.WindowsCalculator","Microsoft.WindowsNotepad","Microsoft.Paint","Microsoft.Paint3D","Microsoft.Windows.Photos","Microsoft.WindowsStore","Microsoft.StorePurchaseApp","Microsoft.WindowsCamera", "Microsoft.NetworkSpeedTest","Microsoft.WindowsAlarms","Microsoft.WindowsSoundRecorder","Microsoft.Todos")
+    $KeepApps = @("Microsoft.WindowsCalculator", "Microsoft.WindowsNotepad", "Microsoft.Paint", "Microsoft.Paint3D", "Microsoft.Windows.Photos", "Microsoft.WindowsStore", "Microsoft.StorePurchaseApp", "Microsoft.WindowsCamera", "Microsoft.NetworkSpeedTest", "Microsoft.WindowsAlarms", "Microsoft.WindowsSoundRecorder", "Lenovo.Hotkeys")
 
     $BloatApps = @(
-    "Microsoft.3DBuilder","Microsoft.BingFinance","Microsoft.BingNews","Microsoft.BingSports","Microsoft.BingWeather",
-    "Microsoft.GetHelp","Microsoft.Getstarted","Microsoft.Messaging","Microsoft.Microsoft3DViewer",
-    "Microsoft.MicrosoftOfficeHub","Microsoft.MicrosoftSolitaireCollection","Microsoft.MixedReality.Portal",
-    "Microsoft.News","Microsoft.Office.OneNote","Microsoft.People","Microsoft.Print3D","Microsoft.SkypeApp",
-    "Microsoft.Wallet","Microsoft.WindowsFeedbackHub","Microsoft.WindowsMaps","Microsoft.Xbox.TCUI",
-    "Microsoft.XboxApp","Microsoft.XboxGameOverlay","Microsoft.XboxGamingOverlay","Microsoft.XboxIdentityProvider",
-    "Microsoft.XboxSpeechToTextOverlay","Microsoft.YourPhone","Microsoft.ZuneMusic","Microsoft.ZuneVideo",
-    "Microsoft.GamingApp","Microsoft.PowerAutomateDesktop","Microsoft.OutlookForWindows","Clipchamp.Clipchamp",
-    "Microsoft.549981C3F5F10","MicrosoftTeams","MSTeams","Microsoft.Teams",
-    "SpotifyAB.SpotifyMusic","LinkedInforWindows","Disney.37853FC22B2CE","Microsoft.MicrosoftJournal",
-    "Microsoft.BingSearch","Microsoft.WindowsCommunicationsApps","Microsoft.WindowsWebExperience",
-    "Microsoft.Copilot","MicrosoftCorporationII.MicrosoftFamily","MicrosoftCorporationII.QuickAssist",
-    "AmazonVideo.PrimeVideo","Facebook.Facebook","Twitter.Twitter","BytedancePte.Ltd.TikTok",
-    "5319275A.WhatsAppDesktop","AD2F1837.HPPrinterControl"
-)
+        "Microsoft.3DBuilder", "Microsoft.BingFinance", "Microsoft.BingNews", "Microsoft.BingSports", "Microsoft.BingWeather",
+        "Microsoft.GetHelp", "Microsoft.Getstarted", "Microsoft.Messaging", "Microsoft.Microsoft3DViewer",
+        "Microsoft.MicrosoftOfficeHub", "Microsoft.MicrosoftSolitaireCollection", "Microsoft.MixedReality.Portal",
+        "Microsoft.News", "Microsoft.Office.OneNote", "Microsoft.People", "Microsoft.Print3D", "Microsoft.SkypeApp",
+        "Microsoft.Wallet", "Microsoft.WindowsFeedbackHub", "Microsoft.WindowsMaps", "Microsoft.Xbox.TCUI",
+        "Microsoft.XboxApp", "Microsoft.XboxGameOverlay", "Microsoft.XboxGamingOverlay", "Microsoft.XboxIdentityProvider",
+        "Microsoft.XboxSpeechToTextOverlay", "Microsoft.YourPhone", "Microsoft.ZuneMusic", "Microsoft.ZuneVideo",
+        "Microsoft.GamingApp", "Microsoft.PowerAutomateDesktop", "Microsoft.OutlookForWindows", "Clipchamp.Clipchamp",
+        "Microsoft.549981C3F5F10", "MicrosoftTeams", "MSTeams", "Microsoft.Teams",
+        "SpotifyAB.SpotifyMusic", "LinkedInforWindows", "Disney.37853FC22B2CE", "Microsoft.MicrosoftJournal",
+        "Microsoft.BingSearch", "Microsoft.WindowsCommunicationsApps", "Microsoft.WindowsWebExperience",
+        "Microsoft.Copilot", "MicrosoftCorporationII.MicrosoftFamily", "MicrosoftCorporationII.QuickAssist",
+        "AmazonVideo.PrimeVideo", "Facebook.Facebook", "Twitter.Twitter", "BytedancePte.Ltd.TikTok",
+        "5319275A.WhatsAppDesktop", "AD2F1837.HPPrinterControl", "Microsoft.Whiteboard", "Microsoft.Todos",
+        "Microsoft.MicrosoftEdge.GameOverlay", "Microsoft.MicrosoftEdge.GameBar", "Amazon.Alexa", "AMZNMobileLLC.Alexa", "AppUp.IntelGraphicsExperience", "Intel.GraphicsControlPanel", "Lenovo.Now", "Lenovo.Voice", "Lenovo.VoiceService", "Lenovo.SmartNoiseCancellation"
+    )
     
 
 
@@ -186,12 +196,12 @@ function Remove-WindowsBloat {
     }
 
     # Teams Machine-Wide Installer (classic MSI - Remove-AppxPackage never touches this)
-$teamsMwi = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+    $teamsMwi = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
     Where-Object { $_.DisplayName -match "Teams Machine-Wide Installer" }
-foreach ($t in $teamsMwi) {
-    Write-Host "Removing Teams Machine-Wide Installer..." -ForegroundColor DarkGray
-    Start-Process msiexec.exe -ArgumentList "/x $($t.PSChildName) /qn /norestart" -Wait
-}
+    foreach ($t in $teamsMwi) {
+        Write-Host "Removing Teams Machine-Wide Installer..." -ForegroundColor DarkGray
+        Start-Process msiexec.exe -ArgumentList "/x $($t.PSChildName) /qn /norestart" -Wait
+    }
 
     Write-Host "[+] Bloatware removal complete." -ForegroundColor Green
 }
@@ -201,10 +211,10 @@ function Clear-StartMenuBloat {
     Write-Host "`nClearing leftover Start menu bloat..." -ForegroundColor Cyan
 
     # 1. Remove provisioned stub packages first - this is what actually stops regeneration
-    $stubApps = @("SpotifyAB.SpotifyMusic","LinkedInforWindows","Disney.37853FC22B2CE","Facebook.Facebook","BytedancePte.Ltd.TikTok","AmazonVideo.PrimeVideo")
+    $stubApps = @("SpotifyAB.SpotifyMusic", "LinkedInforWindows", "Disney.37853FC22B2CE", "Facebook.Facebook", "BytedancePte.Ltd.TikTok", "AmazonVideo.PrimeVideo")
     foreach ($app in $stubApps) {
         Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq $app |
-            Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
+        Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
         Get-AppxPackage -Name $app -AllUsers -ErrorAction SilentlyContinue | Remove-AppxPackage -ErrorAction SilentlyContinue
     }
 
@@ -216,12 +226,12 @@ function Clear-StartMenuBloat {
     Remove-Item "$startDb\StartMenuLayoutCache" -Recurse -Force -ErrorAction SilentlyContinue
 
     # 3. Purge stray shortcuts from Start Menu folders (unchanged, expanded list)
-    $bloatNames = "Teams","Xbox","Solitaire","Disney","Spotify","TikTok","Netflix","LinkedIn","Candy Crush","Prime Video","Facebook"
+    $bloatNames = "Teams", "Xbox", "Solitaire", "Disney", "Spotify", "TikTok", "Netflix", "LinkedIn", "Candy Crush", "Prime Video", "Facebook"
     $startPaths = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
     foreach ($path in $startPaths) {
         Get-ChildItem $path -Recurse -Include *.lnk -ErrorAction SilentlyContinue |
-            Where-Object { $n = $_.BaseName; ($bloatNames | Where-Object { $n -match [regex]::Escape($_) }) } |
-            Remove-Item -Force -ErrorAction SilentlyContinue
+        Where-Object { $n = $_.BaseName; ($bloatNames | Where-Object { $n -match [regex]::Escape($_) }) } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     }
     Write-Host "Start menu bloat cleared." -ForegroundColor Green
 }
@@ -233,24 +243,25 @@ function Remove-OEMBloat {
     # 👉 expanded Dell list - added Dell Sync, Peripheral Manager, Pair, Mobile Connect,
     # 👉 Power Manager, Cinema, Product Registration, Watchdog, MyDell, Trusted Device, etc.
     $oemApps = @{
-        "Dell"    = @("Dell SupportAssist","Dell Digital Delivery","Dell Optimizer","Dell Update","SupportAssist",
-                      "Dell Sync","Dell Peripheral Manager","Dell Pair","Dell Mobile Connect","Dell Power Manager",
-                      "Dell Cinema","Dell Product Registration","Dell Watchdog Timer","MyDell","Dell Core Services",
-                      "Dell SupportAssist Remediation","Dell SupportAssist OS Recovery","Dell Trusted Device Agent",
-                      "Dell Command | Update","Dell Display Manager")
-        "HP"      = @("HP Support Assistant","HP JumpStart","HP Documentation","HPSA Service","HP System Info HSA Service")
-        "Lenovo"  = @("Lenovo Vantage","Lenovo Utility","Lenovo Companion","Lenovo App Explorer")
+        "Dell"   = @("Dell SupportAssist", "Dell Digital Delivery", "Dell Optimizer", "Dell Update", "SupportAssist",
+            "Dell Sync", "Dell Peripheral Manager", "Dell Pair", "Dell Mobile Connect", "Dell Power Manager",
+            "Dell Cinema", "Dell Product Registration", "Dell Watchdog Timer", "MyDell", "Dell Core Services",
+            "Dell SupportAssist Remediation", "Dell SupportAssist OS Recovery", "Dell Trusted Device Agent",
+            "Dell Command | Update", "Dell Display Manager", "Dell Connected Service Delivery")
+        "HP"     = @("HP Support Assistant", "HP JumpStart", "HP Documentation", "HPSA Service", "HP System Info HSA Service")
+        "Lenovo" = @("Lenovo Vantage", "Lenovo Utility", "Lenovo Companion", "Lenovo App Explorer")
     }
 
     # 👉 NEW: vendor-agnostic "useless software" list - this junk ships on Dell/HP/Lenovo/Asus alike
     # 👉 regardless of chipset (Realtek/Waves), so it's checked no matter what the manufacturer is
     $commonBloat = @(
-        "Waves MaxxAudio","Waves Audio","MaxxAudio","Dolby Access","Dolby Audio",
-        "McAfee","Norton Security","WildTangent","Booking.com","Amazon Assistant",
-        "Realtek Audio Console"
+        "Waves MaxxAudio", "Waves Audio", "MaxxAudio", "Dolby Access", "Dolby Audio",
+        "McAfee", "Norton Security", "WildTangent", "Booking.com", "Amazon Assistant",
+        "Realtek Audio Console", "Gaming Services", "Microsoft GameInput", "GameInput", "Intel Graphics Command Center", "Lenovo Now",
+        "Lenovo Smart Noise Cancellation", "Lenovo Voice", "Lenovo Voice Service", "Microsoft Edge For Game Bar", "Microsoft Edge Game Bar", "Microsoft Whiteboard", "Microsoft Teams Meeting Add-in for Microsoft Office", "Microsoft Teams Meeting Add-in", "Microsoft To Do", "Microsoft To-Do", "Alexa", "Tesseract-OCR", "NetMirror"
     )
 
-    $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
+    $installed = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
 
     # 👉 helper block reused for both lists below
     $removeMatching = {
@@ -261,7 +272,8 @@ function Remove-OEMBloat {
                 Write-Host "Removing: $($m.DisplayName)" -ForegroundColor DarkGray
                 if ($m.UninstallString -match "msiexec") {
                     Start-Process msiexec.exe -ArgumentList "/x $($m.PSChildName) /qn /norestart" -Wait
-                } else {
+                }
+                else {
                     Start-Process cmd.exe -ArgumentList "/c $($m.UninstallString) /quiet /norestart" -Wait -ErrorAction SilentlyContinue
                 }
             }
@@ -334,11 +346,11 @@ function Set-StartMenuTweaks {
 # ---------------- SECTION 2: SOFTWARE UNINSTALLER (GUI CHECKBOX) ----------------
 function Show-InstalledSoftware {
     Write-Host "`n[*] Scanning installed software..." -ForegroundColor Cyan
-    $paths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*","HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*")
+    $paths = @("HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*")
     $software = Get-ItemProperty $paths -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.UninstallString } | Select-Object DisplayName, UninstallString, PSChildName | Sort-Object DisplayName -Unique
 
     # 👉 Always-hidden keywords - these never appear in the uninstall picker
-    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64","rustdesk", "scan to", "winrar", "workflow manager", "google chrome" )
+    $hiddenKeywords = @("application verifier", "autocad", "autodesk", "bentley", "staad", "icecap", "java", "microsoft", "pdf24", "security update for microsoft", "vlc", "windows sdk", "windows driver package", "windows driver framework", "c++ redistributable", "visual c++", "visual studio", "anydesk", "connection client", "diagnosticsHub_CollectionService", "intelli", "intel", "nvidia", "amd", "amd64", "rustdesk", "scan to", "winrar", "workflow manager", "google chrome", "windows app runtime" )
 
     # 👉 Filter out any DisplayName containing a hidden keyword (case-insensitive)
     $software = $software | Where-Object {
@@ -356,24 +368,24 @@ function Show-InstalledSoftware {
     $form.Text = "Select Software to Uninstall - @MRGARGSIR"
     $form.Size = New-Object System.Drawing.Size(560, 650)
     $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30); $form.ForeColor = [System.Drawing.Color]::White
 
     $searchBox = New-Object System.Windows.Forms.TextBox
     $searchBox.Location = New-Object System.Drawing.Point(10, 10); $searchBox.Size = New-Object System.Drawing.Size(520, 24)
-    $searchBox.BackColor = [System.Drawing.Color]::FromArgb(45,45,45); $searchBox.ForeColor = [System.Drawing.Color]::White
+    $searchBox.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45); $searchBox.ForeColor = [System.Drawing.Color]::White
     $form.Controls.Add($searchBox)
 
     $checkList = New-Object System.Windows.Forms.CheckedListBox
     $checkList.Location = New-Object System.Drawing.Point(10, 44); $checkList.Size = New-Object System.Drawing.Size(520, 460)
-    $checkList.CheckOnClick = $true; $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+    $checkList.CheckOnClick = $true; $checkList.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $checkList.ForeColor = [System.Drawing.Color]::White; $checkList.BorderStyle = "FixedSingle"
     $form.Controls.Add($checkList)
     foreach ($item in $software) { [void]$checkList.Items.Add($item.DisplayName) }
 
     $searchBox.Add_TextChanged({
-        $filter = $searchBox.Text; $checkList.Items.Clear()
-        foreach ($item in $software) { if ($item.DisplayName -like "*$filter*") { [void]$checkList.Items.Add($item.DisplayName) } }
-    })
+            $filter = $searchBox.Text; $checkList.Items.Clear()
+            foreach ($item in $software) { if ($item.DisplayName -like "*$filter*") { [void]$checkList.Items.Add($item.DisplayName) } }
+        })
 
     $btnSelectAll = New-Object System.Windows.Forms.Button
     $btnSelectAll.Text = "Select All"; $btnSelectAll.Location = New-Object System.Drawing.Point(10, 512); $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
@@ -387,7 +399,7 @@ function Show-InstalledSoftware {
 
     $btnUninstall = New-Object System.Windows.Forms.Button
     $btnUninstall.Text = "Uninstall Selected"; $btnUninstall.Location = New-Object System.Drawing.Point(340, 512); $btnUninstall.Size = New-Object System.Drawing.Size(190, 34)
-    $btnUninstall.BackColor = [System.Drawing.Color]::FromArgb(200,60,60); $btnUninstall.ForeColor = [System.Drawing.Color]::White
+    $btnUninstall.BackColor = [System.Drawing.Color]::FromArgb(200, 60, 60); $btnUninstall.ForeColor = [System.Drawing.Color]::White
     $btnUninstall.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $form.Controls.Add($btnUninstall); $form.AcceptButton = $btnUninstall
 
@@ -418,11 +430,13 @@ function Show-InstalledSoftware {
             if ($target.UninstallString -match "msiexec") {
                 $productCode = $target.PSChildName
                 Start-Process "msiexec.exe" -ArgumentList "/x $productCode /quiet /norestart" -Wait
-            } else {
+            }
+            else {
                 Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$($target.UninstallString)`"" -Wait
             }
             Write-Host "  Done: $($target.DisplayName)" -ForegroundColor Green
-        } catch { Write-Host "  Failed: $($target.DisplayName) - $($_.Exception.Message)" -ForegroundColor Red }
+        }
+        catch { Write-Host "  Failed: $($target.DisplayName) - $($_.Exception.Message)" -ForegroundColor Red }
     }
     [System.Windows.Forms.MessageBox]::Show("Uninstall process finished. Check console for details.", "Done") | Out-Null
 }
@@ -431,7 +445,7 @@ function Show-InstalledSoftware {
 function Set-BrowserTweaks {
     Write-Host "`nApplying Chrome and Edge policy tweaks..." -ForegroundColor Cyan
     $chromePath = "HKLM:\Software\Policies\Google\Chrome"
-    $edgePath   = "HKLM:\Software\Policies\Microsoft\Edge"
+    $edgePath = "HKLM:\Software\Policies\Microsoft\Edge"
     foreach ($p in @($chromePath, $edgePath)) {
         if (-not (Test-Path $p)) { New-Item -Path $p -Force | Out-Null }
     }
@@ -441,7 +455,7 @@ function Set-BrowserTweaks {
     Set-ItemProperty -Path $edgePath   -Name BackgroundModeEnabled -Value 0 -Type DWord -Force
 
     # AI tips / GenAI features off
-    $chromeAi = @{ GenAiDefaultSettings=1; HelpMeWriteSettings=1; TabOrganizerSettings=1; HistorySearchSettings=1; CreateThemesSettings=1; TabCompareSettings=1; AIModeSettings=1 }
+    $chromeAi = @{ GenAiDefaultSettings = 1; HelpMeWriteSettings = 1; TabOrganizerSettings = 1; HistorySearchSettings = 1; CreateThemesSettings = 1; TabCompareSettings = 1; AIModeSettings = 1 }
     foreach ($k in $chromeAi.Keys) { Set-ItemProperty -Path $chromePath -Name $k -Value $chromeAi[$k] -Type DWord -Force }
     Set-ItemProperty -Path $edgePath -Name HubsSidebarEnabled -Value 0 -Type DWord -Force
     Set-ItemProperty -Path $edgePath -Name CopilotPageContext -Value 0 -Type DWord -Force
@@ -459,23 +473,24 @@ function Disable-StartupItems {
 
     # 👉 Whitelist - these are NEVER touched, auto or manual selection skips them entirely
     $whitelistKeywords = @(
-    "onedrive","default","MicrosoftList","Microsoft.Lists","PDF24","RtkAudUService","SecurityHealth",
-    "edgeupdate","GoogleUpdate","GoogleDriveFS",
-    "bit4id","cryptoidmon","hyperpki","ncodepkicomponent","b4notify","securityhealthsystray"
-)
+        "onedrive", "default", "MicrosoftList", "Microsoft.Lists", "PDF24", "RtkAudUService", "SecurityHealth",
+        "edgeupdate", "GoogleUpdate", "GoogleDriveFS",
+        "bit4id", "cryptoidmon", "hyperpki", "ncodepkicomponent", "b4notify", "securityhealthsystray"
+    )
 
     $targetKeywords = @(
-    "anydesk","bluestacks","hd-player","chrome","googlechrome","microsoftedgeautolaunch","spotify","discord",
-    "teams","adobe","acrord32","acrotray","adobecollabsync","skype","steam","epicgameslauncher","autodesk",
-    "autocad","bently","staad","vlc","zoom","dropbox","skypeapp","slack","notepad","putty","winscp","filezilla",
-    "teamviewer","grammarly",
-    "dopdf","printershare","hpwuschd","hp software update","lenovovantage","sunjavaupdatesched",
-    "wd_spsocketserver","wd_stdcertm","wondershare","netsetman","camo studio","intel.*graphics command center",
-    "opera","whatsapp","chatgpt","quickphrase","microsoft to do","phone link","terminal","Adobe", "Acrobat" 
-)
+        "anydesk", "bluestacks", "hd-player", "chrome", "googlechrome", "microsoftedgeautolaunch", "spotify", "discord",
+        "teams", "adobe", "acrord32", "acrotray", "adobecollabsync", "skype", "steam", "epicgameslauncher", "autodesk",
+        "autocad", "bently", "staad", "vlc", "zoom", "dropbox", "skypeapp", "slack", "notepad", "putty", "winscp", "filezilla",
+        "teamviewer", "grammarly",
+        "expressstartupservice", "mobile devices", "adobe acrobat synchronizer", "lenovovantage", "lenovovantagetoolbar", "localservicecontrol", "microsoftedgeautolaunch", "opera browser assistant", "opera", "smartconnect", "statusalerts", "sunjavaupdatesched", "wd_spsocketserver", "wd_stdcertm", "wondershare helper compact", "wondershare",
+        "dopdf", "printershare", "hpwuschd", "hp software update", "lenovovantage", "sunjavaupdatesched",
+        "wd_spsocketserver", "wd_stdcertm", "wondershare", "netsetman", "camo studio", "intel.*graphics command center",
+        "opera", "whatsapp", "chatgpt", "quickphrase", "microsoft to do", "phone link", "terminal", "Adobe", "Acrobat" , "waves"
+    )
 
-    $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\Microsoft\Windows\CurrentVersion\Run","HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
-    $startupApprovedPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run","HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32")
+    $regPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Run", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run")
+    $startupApprovedPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32")
 
     # 👉 helper to check if a name matches the whitelist (never touch)
     function Test-Whitelisted($name) {
@@ -508,7 +523,7 @@ function Disable-StartupItems {
                 if (Test-Whitelisted $name) { continue }   # 👉 skip OneDrive etc.
                 if (Test-TargetMatch $name) {
                     Write-Host "  Disabling modern startup app: $name" -ForegroundColor DarkGray
-                    $disabledValue = [byte[]](0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+                    $disabledValue = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
                     Set-ItemProperty -Path $path -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
                 }
             }
@@ -523,7 +538,8 @@ function Disable-StartupItems {
             Write-Host "  Disabling scheduled task: $($task.TaskName)" -ForegroundColor DarkGray
             Disable-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue | Out-Null
         }
-    } else {
+    }
+    else {
         Write-Host "  Skipped scheduled task cleanup (not available on this Windows version)." -ForegroundColor Yellow
     }
     Write-Host "[+] Known startup items disabled." -ForegroundColor Green
@@ -559,7 +575,7 @@ function Disable-StartupItems {
     $form.Text = "Remaining Startup Items - @MRGARGSIR"
     $form.Size = New-Object System.Drawing.Size(560, 590)
     $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30); $form.ForeColor = [System.Drawing.Color]::White
 
     $label = New-Object System.Windows.Forms.Label
     $label.Text = "$($remaining.Count) other startup item(s) found. Check any you want to disable:"
@@ -569,7 +585,7 @@ function Disable-StartupItems {
 
     $checkList = New-Object System.Windows.Forms.CheckedListBox
     $checkList.Location = New-Object System.Drawing.Point(10, 36); $checkList.Size = New-Object System.Drawing.Size(520, 400)
-    $checkList.CheckOnClick = $true; $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+    $checkList.CheckOnClick = $true; $checkList.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $checkList.ForeColor = [System.Drawing.Color]::White; $checkList.BorderStyle = "FixedSingle"
     $form.Controls.Add($checkList)
 
@@ -588,7 +604,7 @@ function Disable-StartupItems {
 
     $btnDisable = New-Object System.Windows.Forms.Button
     $btnDisable.Text = "Disable Selected"; $btnDisable.Location = New-Object System.Drawing.Point(340, 448); $btnDisable.Size = New-Object System.Drawing.Size(190, 34)
-    $btnDisable.BackColor = [System.Drawing.Color]::FromArgb(200,60,60); $btnDisable.ForeColor = [System.Drawing.Color]::White
+    $btnDisable.BackColor = [System.Drawing.Color]::FromArgb(200, 60, 60); $btnDisable.ForeColor = [System.Drawing.Color]::White
     $btnDisable.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $form.Controls.Add($btnDisable); $form.AcceptButton = $btnDisable
 
@@ -606,15 +622,17 @@ function Disable-StartupItems {
             $path = $remaining[$name]
             if ($path -match "StartupApproved") {
                 Write-Host "  Disabling modern startup app: $name" -ForegroundColor DarkGray
-                $disabledValue = [byte[]](0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+                $disabledValue = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
                 Set-ItemProperty -Path $path -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
-            } else {
+            }
+            else {
                 Write-Host "  Removing startup entry: $name ($path)" -ForegroundColor DarkGray
                 Remove-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue
             }
         }
         Write-Host "[+] Selected additional startup items disabled." -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "  Skipped remaining startup items." -ForegroundColor DarkGray
     }
 }
@@ -648,7 +666,8 @@ function Set-TaskbarTweaks {
 
         # 👉 Widgets panel toggle - Windows 11 only. Often locked by a protected ACL on 23H2/24H2 builds even for admins; handled quietly above.
         Set-RegValueSafe $advPath "TaskbarDa" 0
-    } else {
+    }
+    else {
         # 👉 "News and interests" feed - the Windows 10 equivalent of Win11's widgets panel
         if (-not (Test-Path $feedsPath)) { New-Item -Path $feedsPath -Force | Out-Null }
         Set-RegValueSafe $feedsPath "ShellFeedsTaskbarViewMode" 2
@@ -692,7 +711,8 @@ function Test-MultipleAntivirus {
         $msg = "Multiple antivirus products were detected:`n`n" + ($names -join "`n") + "`n`nRunning more than one antivirus can cause conflicts and false positives.`n`nOpen 'Apps & Features' now to uninstall extras?"
         $result = [System.Windows.Forms.MessageBox]::Show($msg, "Multiple Antivirus Detected", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
         if ($result -eq [System.Windows.Forms.DialogResult]::Yes) { Start-Process "ms-settings:appsfeatures" }
-    } else { Write-Host "  OK - single or no antivirus detected." -ForegroundColor Green }
+    }
+    else { Write-Host "  OK - single or no antivirus detected." -ForegroundColor Green }
 }
 
 # ---------------- SECTION 8: DISABLE COPILOT ----------------
@@ -728,7 +748,7 @@ function Disable-UnnecessaryScheduledTasks {
         return
     }
 
-    $tasksToDisable = @("Microsoft\Windows\Customer Experience Improvement Program\Consolidator","Microsoft\Windows\Customer Experience Improvement Program\UsbCeip","Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector","Microsoft\Windows\Feedback\Siuf\DmClient","Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload","Microsoft\Windows\Windows Error Reporting\QueueReporting","Microsoft\Windows\Maps\MapsToastTask","Microsoft\Windows\Maps\MapsUpdateTask","Microsoft\Windows\PI\Sqm-Tasks","Microsoft\Windows\Shell\FamilySafetyMonitor","Microsoft\Windows\Shell\FamilySafetyRefresh","Microsoft\Windows\Retail Demo\CleanupOffline")
+    $tasksToDisable = @("Microsoft\Windows\Customer Experience Improvement Program\Consolidator", "Microsoft\Windows\Customer Experience Improvement Program\UsbCeip", "Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector", "Microsoft\Windows\Feedback\Siuf\DmClient", "Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload", "Microsoft\Windows\Windows Error Reporting\QueueReporting", "Microsoft\Windows\Maps\MapsToastTask", "Microsoft\Windows\Maps\MapsUpdateTask", "Microsoft\Windows\PI\Sqm-Tasks", "Microsoft\Windows\Shell\FamilySafetyMonitor", "Microsoft\Windows\Shell\FamilySafetyRefresh", "Microsoft\Windows\Retail Demo\CleanupOffline")
 
     #$advancetasksToDisable = @("Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser","Microsoft\Windows\Application Experience\ProgramDataUpdater","Microsoft\Windows\Autochk\Proxy"
 
@@ -738,7 +758,8 @@ function Disable-UnnecessaryScheduledTasks {
         try {
             Disable-ScheduledTask -TaskName $taskName -TaskPath $folder -ErrorAction SilentlyContinue | Out-Null
             Write-Host "  Disabled: $taskPath" -ForegroundColor DarkGray
-        } catch {}
+        }
+        catch {}
     }
     Write-Host "[+] Unnecessary scheduled tasks disabled." -ForegroundColor Green
 }
@@ -784,14 +805,15 @@ function Test-WindowsActivation {
     Write-Host "`n[*] Checking Windows activation status..." -ForegroundColor Cyan
     try {
         $lic = Get-CimInstance -Query "SELECT * FROM SoftwareLicensingProduct WHERE PartialProductKey IS NOT NULL AND ApplicationID='55c92734-d682-4d71-983e-d6ec3f16059f'" -ErrorAction Stop
-        $statusMap = @{0="Unlicensed";1="Licensed (Activated)";2="Out-Of-Box Grace Period";3="Out-Of-Tolerance Grace Period";4="Non-Genuine Grace Period";5="Notification";6="Extended Grace Period"}
+        $statusMap = @{0 = "Unlicensed"; 1 = "Licensed (Activated)"; 2 = "Out-Of-Box Grace Period"; 3 = "Out-Of-Tolerance Grace Period"; 4 = "Non-Genuine Grace Period"; 5 = "Notification"; 6 = "Extended Grace Period" }
         foreach ($item in $lic) {
             $statusText = $statusMap[[int]$item.LicenseStatus]
             $color = if ($item.LicenseStatus -eq 1) { "Green" } else { "Red" }
             Write-Host "  Edition: $($item.Name)" -ForegroundColor DarkGray
             Write-Host "  Status : $statusText" -ForegroundColor $color
         }
-    } catch { Write-Host "  Could not query activation status: $($_.Exception.Message)" -ForegroundColor Yellow }
+    }
+    catch { Write-Host "  Could not query activation status: $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
 # ---------------- SECTION 13: OFFICE ACTIVATION CHECK ----------------
@@ -819,13 +841,14 @@ function Test-OfficeActivation {
                 Write-Host "  Status : $status" -ForegroundColor $color
             }
         }
-    } catch { Write-Host "  Could not run ospp.vbs: $($_.Exception.Message)" -ForegroundColor Yellow }
+    }
+    catch { Write-Host "  Could not run ospp.vbs: $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 
 # ---------------- SECTION 14: TEMP + UPDATE CACHE CLEANUP ----------------
 function Clear-TempAndUpdateCache {
     Write-Host "`n[*] Cleaning temporary files and Windows Update cache..." -ForegroundColor Cyan
-    $tempPaths = @("$env:TEMP\*","$env:WINDIR\Temp\*","$env:WINDIR\Prefetch\*")
+    $tempPaths = @("$env:TEMP\*", "$env:WINDIR\Temp\*", "$env:WINDIR\Prefetch\*")
     foreach ($path in $tempPaths) { Write-Host "  Clearing: $path" -ForegroundColor DarkGray; Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue }
     $services = @("wuauserv", "bits", "cryptsvc")
     foreach ($svc in $services) { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue }
@@ -835,12 +858,14 @@ function Clear-TempAndUpdateCache {
     # 👉 Clear-RecycleBin cmdlet isn't available on Windows 7 - use COM Shell fallback instead
     if (Get-Command Clear-RecycleBin -ErrorAction SilentlyContinue) {
         Clear-RecycleBin -Force -ErrorAction SilentlyContinue
-    } else {
+    }
+    else {
         try {
             $shell = New-Object -ComObject Shell.Application
             $recycleBin = $shell.Namespace(0xA)
             $recycleBin.Items() | ForEach-Object { Remove-Item $_.Path -Recurse -Force -ErrorAction SilentlyContinue }
-        } catch { Write-Host "  Could not empty Recycle Bin via fallback method." -ForegroundColor Yellow }
+        }
+        catch { Write-Host "  Could not empty Recycle Bin via fallback method." -ForegroundColor Yellow }
     }
     Write-Host "[+] Temp files and Update cache cleared." -ForegroundColor Green
 }
@@ -852,11 +877,13 @@ function Update-AllApps {
     # 👉 Store app scan trigger stays automatic - no per-app choice for Store apps, it's just a background scan flag
     try {
         Get-CimInstance -Namespace "root\cimv2\mdm\dmmap" -ClassName "MDM_EnterpriseModernAppManagement_AppManagement01" -ErrorAction SilentlyContinue | Invoke-CimMethod -MethodName UpdateScanMethod -ErrorAction SilentlyContinue | Out-Null
-    } catch { Write-Host "  Store app scan trigger skipped." -ForegroundColor Yellow }
+    }
+    catch { Write-Host "  Store app scan trigger skipped." -ForegroundColor Yellow }
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host "  winget not found - skipping desktop app updates." -ForegroundColor Yellow
-    } else {
+    }
+    else {
         Write-Host "  Checking winget for available updates..." -ForegroundColor DarkGray
 
         $raw = winget upgrade --accept-source-agreements | Out-String
@@ -885,7 +912,8 @@ function Update-AllApps {
                 if ($sourceStart -gt 0 -and $line.Length -ge $sourceStart) {
                     $availableVersion = $line.Substring($availableStart, $sourceStart - $availableStart).Trim()
                     $source = $line.Substring($sourceStart).Trim()
-                } else {
+                }
+                else {
                     $availableVersion = $line.Substring($availableStart).Trim()
                     $source = "winget"
                 }
@@ -927,13 +955,14 @@ function Update-AllApps {
 
         if ($packages.Count -eq 0) {
             Write-Host "  No stable-channel winget updates available." -ForegroundColor Green
-        } else {
+        }
+        else {
             # 👉 ListView with real columns instead of a plain checklist - shows Name, Current, Available, Source
             $form = New-Object System.Windows.Forms.Form
             $form.Text = "Select Apps to Update (Stable Channel Only) - @MRGARGSIR"
             $form.Size = New-Object System.Drawing.Size(760, 590)
             $form.StartPosition = "CenterScreen"; $form.FormBorderStyle = "FixedDialog"; $form.MaximizeBox = $false
-            $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30); $form.ForeColor = [System.Drawing.Color]::White
+            $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30); $form.ForeColor = [System.Drawing.Color]::White
 
             $label = New-Object System.Windows.Forms.Label
             $label.Text = "$($packages.Count) stable update(s) available. Uncheck any you want to skip:"
@@ -948,7 +977,7 @@ function Update-AllApps {
             $listView.CheckBoxes = $true
             $listView.FullRowSelect = $true
             $listView.GridLines = $true
-            $listView.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+            $listView.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
             $listView.ForeColor = [System.Drawing.Color]::White
             [void]$listView.Columns.Add("App Name", 260)
             [void]$listView.Columns.Add("Current Version", 140)
@@ -977,7 +1006,7 @@ function Update-AllApps {
 
             $btnUpdate = New-Object System.Windows.Forms.Button
             $btnUpdate.Text = "Update Selected"; $btnUpdate.Location = New-Object System.Drawing.Point(500, 478); $btnUpdate.Size = New-Object System.Drawing.Size(230, 34)
-            $btnUpdate.BackColor = [System.Drawing.Color]::FromArgb(60,140,60); $btnUpdate.ForeColor = [System.Drawing.Color]::White
+            $btnUpdate.BackColor = [System.Drawing.Color]::FromArgb(60, 140, 60); $btnUpdate.ForeColor = [System.Drawing.Color]::White
             $btnUpdate.DialogResult = [System.Windows.Forms.DialogResult]::OK
             $form.Controls.Add($btnUpdate); $form.AcceptButton = $btnUpdate
 
@@ -1000,7 +1029,8 @@ function Update-AllApps {
                     }
                 }
                 Write-Host "[+] Selected app updates complete." -ForegroundColor Green
-            } else {
+            }
+            else {
                 Write-Host "  Skipped all winget updates." -ForegroundColor DarkGray
             }
         }
@@ -1013,10 +1043,12 @@ function Update-AllApps {
             Write-Host "  Running Windows Update..." -ForegroundColor DarkGray
             Import-Module PSWindowsUpdate
             Get-WindowsUpdate -AcceptAll -Install -AutoReboot:$false
-        } else {
+        }
+        else {
             Write-Host "  Skipped Windows Update." -ForegroundColor DarkGray
         }
-    } else { Write-Host "  PSWindowsUpdate module not installed - skipping OS update step." -ForegroundColor Yellow }
+    }
+    else { Write-Host "  PSWindowsUpdate module not installed - skipping OS update step." -ForegroundColor Yellow }
 
     Write-Host "[+] Update pass complete." -ForegroundColor Green
 }
@@ -1043,7 +1075,7 @@ function Disable-LockScreenAdsAndTips {
     Write-Host "`n[*] Disabling lock screen ads and tips..." -ForegroundColor Cyan
     $contentDeliveryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
     if (-not (Test-Path $contentDeliveryPath)) { New-Item -Path $contentDeliveryPath -Force | Out-Null }
-    $cdmSettings = @{"RotatingLockScreenOverlayEnabled"=0;"SubscribedContent-338387Enabled"=0;"SubscribedContent-338388Enabled"=0;"SubscribedContent-338389Enabled"=0;"SubscribedContent-353694Enabled"=0;"SubscribedContent-353696Enabled"=0;"SilentInstalledAppsEnabled"=0;"SystemPaneSuggestionsEnabled"=0;"ContentDeliveryAllowed"=0;"OemPreInstalledAppsEnabled"=0;"PreInstalledAppsEnabled"=0;"PreInstalledAppsEverEnabled"=0}
+    $cdmSettings = @{"RotatingLockScreenOverlayEnabled" = 0; "SubscribedContent-338387Enabled" = 0; "SubscribedContent-338388Enabled" = 0; "SubscribedContent-338389Enabled" = 0; "SubscribedContent-353694Enabled" = 0; "SubscribedContent-353696Enabled" = 0; "SilentInstalledAppsEnabled" = 0; "SystemPaneSuggestionsEnabled" = 0; "ContentDeliveryAllowed" = 0; "OemPreInstalledAppsEnabled" = 0; "PreInstalledAppsEnabled" = 0; "PreInstalledAppsEverEnabled" = 0 }
     foreach ($key in $cdmSettings.Keys) { Set-ItemProperty -Path $contentDeliveryPath -Name $key -Value $cdmSettings[$key] -Type DWord -Force }
     Write-Host "[+] Lock screen ads and tips disabled." -ForegroundColor Green
 }
@@ -1127,7 +1159,7 @@ function Set-NetworkOptimizations {
     # 2. Set DNS to Cloudflare (primary) + Google (secondary) on active adapters
     $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
     foreach ($adapter in $adapters) {
-        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("8.8.8.8","1.1.1.1") -ErrorAction SilentlyContinue
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("8.8.8.8", "1.1.1.1") -ErrorAction SilentlyContinue
         Write-Host "DNS set to Cloudflare/Google on $($adapter.Name)." -ForegroundColor DarkGray
     }
     ipconfig /flushdns | Out-Null
@@ -1161,7 +1193,8 @@ function Set-IndexerAndSysMain {
         Set-Service -Name SysMain -StartupType Disabled -ErrorAction SilentlyContinue
         Stop-Service -Name SysMain -Force -ErrorAction SilentlyContinue
         Write-Host "SysMain disabled (low RAM system: $ramGB GB)." -ForegroundColor DarkGray
-    } else {
+    }
+    else {
         Write-Host "SysMain left enabled ($ramGB GB RAM - benefits from prefetching)." -ForegroundColor DarkGray
     }
 
@@ -1197,7 +1230,7 @@ function Optimize-BackgroundServices {
         "WerSvc",                # Windows Error Reporting
         "RetailDemo",            # Retail Demo Service (irrelevant outside retail store displays)
         "MapsBroker"           # Downloaded Maps Manager (if Maps app removed)
-        )
+    )
 
     foreach ($svc in $servicesToDisable) {
         $s = Get-Service -Name $svc -ErrorAction SilentlyContinue
@@ -1251,38 +1284,38 @@ function Show-MasterMenu {
     # 👉 Task registry: Label shown in GUI -> function to call
     # 👉 "Checked" = pre-ticked by default (your core requested list), rest are optional extras (Part 5)
     $taskList = [ordered]@{
-        "Make Partition" = @{ Fn = "New-DataPartitionFromFreeSpace"; Checked = $true }
-        "Remove Windows Bloatware (keep Calculator/Notepad/Paint/Photos/Store)" = @{ Fn = "Remove-WindowsBloat"; Checked = $true }
-        "Remove Start Menu Bloat" = @{ Fn = "Clear-StartMenuBloat"; Checked = $true }
-        "Start Menu Tweaks (hide recommended, grid layout)" = @{ Fn = "Set-StartMenuTweaks"; Checked = $true }
+        "Make Partition"                                                             = @{ Fn = "New-DataPartitionFromFreeSpace"; Checked = $true }
+        "Remove Windows Bloatware (keep Calculator/Notepad/Paint/Photos/Store)"      = @{ Fn = "Remove-WindowsBloat"; Checked = $true }
+        "Remove Start Menu Bloat"                                                    = @{ Fn = "Clear-StartMenuBloat"; Checked = $true }
+        "Start Menu Tweaks (hide recommended, grid layout)"                          = @{ Fn = "Set-StartMenuTweaks"; Checked = $true }
         "Taskbar Tweaks (Left align, Search icon-only, Hide Task View, Widgets off)" = @{ Fn = "Set-TaskbarTweaks"; Checked = $true }
-        "File Explorer Tweaks (This PC default, Show hidden items)"            = @{ Fn = "Set-ExplorerTweaks"; Checked = $true }
-        "Browser Tweaks"                          = @{ Fn = "Set-BrowserTweaks"; Checked = $true }
-        "Disable Copilot"                                                      = @{ Fn = "Disable-Copilot"; Checked = $true }
-        "Disable Unnecessary Scheduled Tasks"                                  = @{ Fn = "Disable-UnnecessaryScheduledTasks"; Checked = $true }
-        "Disable Telemetry + Advertising ID"                                   = @{ Fn = "Disable-TelemetryAndAdvertising"; Checked = $true }
-        "Check Windows Activation Status"                                      = @{ Fn = "Test-WindowsActivation"; Checked = $true }
-        "Check MS Office Activation Status"                                    = @{ Fn = "Test-OfficeActivation"; Checked = $true }
-        "Clean Temp Files + Windows Update Cache"                              = @{ Fn = "Clear-TempAndUpdateCache"; Checked = $true }
-        "-- OPTIONAL EXTRAS BELOW --"                                          = @{ Fn = $null; Checked = $false }   # 👉 separator row, not clickable
-        "Enable Classic Right-Click Context Menu"                              = @{ Fn = "Enable-ClassicContextMenu"; Checked = $true }
-        "Disable Lock Screen Ads / Tips"                                       = @{ Fn = "Disable-LockScreenAdsAndTips"; Checked = $true }
-        "Enable Dark Mode"                                                     = @{ Fn = "Enable-DarkMode"; Checked = $false }
-        "Disable Cortana Web Search Results in Start Menu"                     = @{ Fn = "Disable-CortanaWebSearch"; Checked = $false }
-        "Performance-Focused Visual Effects"                                   = @{ Fn = "Set-PerformanceVisuals"; Checked = $false }
-        "Repair Print Spooler & Font Cache"            = @{ Fn = "Repair-PrintAndFontCache"; Checked = $true}
-        "Network Optimizations (NLA delay, DNS, IPv6)" = @{ Fn = "Set-NetworkOptimizations"; Checked = $true }
-        "Disable Fast Startup"                                                 = @{ Fn = "Disable-FastStartup"; Checked = $true }
-        "Tune Search Indexer and SysMain"                                      = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
-        "Optimize Background Services + Notifications + Clipboard" = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
-        "Disable Sleep When Plugged In" = @{ Fn = "Set-PowerSleepNever"; Checked = $true }
-        "Remove OEM Bloat (Dell/HP/Lenovo)" = @{ Fn = "Remove-OEMBloat"; Checked = $true }
-        "Disable Windows Recall"           = @{ Fn = "Disable-Recall"; Checked = $true }
-        "Uninstall Software (opens selection window)"                          = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
-        "Check for Multiple Antivirus (warning prompt)"                        = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
-        "Enable Defender + Update Signatures"                                  = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
-        "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"    = @{ Fn = "Disable-StartupItems"; Checked = $true }
-        "Update All Apps (Store + Winget + Windows Update)"                    = @{ Fn = "Update-AllApps"; Checked = $true }
+        "File Explorer Tweaks (This PC default, Show hidden items)"                  = @{ Fn = "Set-ExplorerTweaks"; Checked = $true }
+        "Browser Tweaks"                                                             = @{ Fn = "Set-BrowserTweaks"; Checked = $true }
+        "Disable Copilot"                                                            = @{ Fn = "Disable-Copilot"; Checked = $true }
+        "Disable Unnecessary Scheduled Tasks"                                        = @{ Fn = "Disable-UnnecessaryScheduledTasks"; Checked = $true }
+        "Disable Telemetry + Advertising ID"                                         = @{ Fn = "Disable-TelemetryAndAdvertising"; Checked = $true }
+        "Check Windows Activation Status"                                            = @{ Fn = "Test-WindowsActivation"; Checked = $true }
+        "Check MS Office Activation Status"                                          = @{ Fn = "Test-OfficeActivation"; Checked = $true }
+        "Clean Temp Files + Windows Update Cache"                                    = @{ Fn = "Clear-TempAndUpdateCache"; Checked = $true }
+        "-- OPTIONAL EXTRAS BELOW --"                                                = @{ Fn = $null; Checked = $false }   # 👉 separator row, not clickable
+        "Enable Classic Right-Click Context Menu"                                    = @{ Fn = "Enable-ClassicContextMenu"; Checked = $true }
+        "Disable Lock Screen Ads / Tips"                                             = @{ Fn = "Disable-LockScreenAdsAndTips"; Checked = $true }
+        "Enable Dark Mode"                                                           = @{ Fn = "Enable-DarkMode"; Checked = $false }
+        "Disable Cortana Web Search Results in Start Menu"                           = @{ Fn = "Disable-CortanaWebSearch"; Checked = $false }
+        "Performance-Focused Visual Effects"                                         = @{ Fn = "Set-PerformanceVisuals"; Checked = $false }
+        "Repair Print Spooler & Font Cache"                                          = @{ Fn = "Repair-PrintAndFontCache"; Checked = $true }
+        "Network Optimizations (NLA delay, DNS, IPv6)"                               = @{ Fn = "Set-NetworkOptimizations"; Checked = $true }
+        "Disable Fast Startup"                                                       = @{ Fn = "Disable-FastStartup"; Checked = $true }
+        "Tune Search Indexer and SysMain"                                            = @{ Fn = "Set-IndexerAndSysMain"; Checked = $true }
+        "Optimize Background Services + Notifications + Clipboard"                   = @{ Fn = "Optimize-BackgroundServices"; Checked = $true }
+        "Disable Sleep When Plugged In"                                              = @{ Fn = "Set-PowerSleepNever"; Checked = $true }
+        "Uninstall Software (opens selection window)"                                = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
+        "Remove OEM Bloat (Dell/HP/Lenovo)"                                          = @{ Fn = "Remove-OEMBloat"; Checked = $true }
+        "Disable Windows Recall"                                                     = @{ Fn = "Disable-Recall"; Checked = $true }
+        "Check for Multiple Antivirus (warning prompt)"                              = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
+        "Enable Defender + Update Signatures"                                        = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
+        "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"         = @{ Fn = "Disable-StartupItems"; Checked = $true }
+        "Update All Apps (Store + Winget + Windows Update)"                          = @{ Fn = "Update-AllApps"; Checked = $true }
     }
 
     # 👉 ---- Build GUI ----
@@ -1292,7 +1325,7 @@ function Show-MasterMenu {
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30,30,30)
+    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
     $form.ForeColor = [System.Drawing.Color]::White
 
     $title = New-Object System.Windows.Forms.Label
@@ -1306,7 +1339,7 @@ function Show-MasterMenu {
     $checkList.Location = New-Object System.Drawing.Point(10, 44)
     $checkList.Size = New-Object System.Drawing.Size(580, 470)
     $checkList.CheckOnClick = $true
-    $checkList.BackColor = [System.Drawing.Color]::FromArgb(45,45,45)
+    $checkList.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
     $checkList.ForeColor = [System.Drawing.Color]::White
     $checkList.BorderStyle = "FixedSingle"
     $checkList.Font = New-Object System.Drawing.Font("Segoe UI", 9)
@@ -1324,11 +1357,11 @@ function Show-MasterMenu {
     $btnSelectAll.Location = New-Object System.Drawing.Point(10, 520)
     $btnSelectAll.Size = New-Object System.Drawing.Size(120, 30)
     $btnSelectAll.Add_Click({
-        for ($i = 0; $i -lt $checkList.Items.Count; $i++) {
-            $label = $checkList.Items[$i]
-            if ($taskList[$label].Fn) { $checkList.SetItemChecked($i, $true) }  # 👉 skip separator row
-        }
-    })
+            for ($i = 0; $i -lt $checkList.Items.Count; $i++) {
+                $label = $checkList.Items[$i]
+                if ($taskList[$label].Fn) { $checkList.SetItemChecked($i, $true) }  # 👉 skip separator row
+            }
+        })
     $form.Controls.Add($btnSelectAll)
 
     $btnSelectNone = New-Object System.Windows.Forms.Button
@@ -1336,8 +1369,8 @@ function Show-MasterMenu {
     $btnSelectNone.Location = New-Object System.Drawing.Point(140, 520)
     $btnSelectNone.Size = New-Object System.Drawing.Size(120, 30)
     $btnSelectNone.Add_Click({
-        for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) }
-    })
+            for ($i = 0; $i -lt $checkList.Items.Count; $i++) { $checkList.SetItemChecked($i, $false) }
+        })
     $form.Controls.Add($btnSelectNone)
 
     # 👉 Run button
@@ -1345,7 +1378,7 @@ function Show-MasterMenu {
     $btnRun.Text = "Run Selected Tweaks"
     $btnRun.Location = New-Object System.Drawing.Point(390, 520)
     $btnRun.Size = New-Object System.Drawing.Size(200, 34)
-    $btnRun.BackColor = [System.Drawing.Color]::FromArgb(60,140,60)
+    $btnRun.BackColor = [System.Drawing.Color]::FromArgb(60, 140, 60)
     $btnRun.ForeColor = [System.Drawing.Color]::White
     $btnRun.DialogResult = [System.Windows.Forms.DialogResult]::OK
     $form.Controls.Add($btnRun)
@@ -1385,12 +1418,13 @@ function Show-MasterMenu {
             $fnName = $taskList[$label].Fn
             try {
                 & $fnName   # 👉 dynamically invoke the mapped function
-            } catch {
+            }
+            catch {
                 Write-Host "  ERROR running $fnName : $($_.Exception.Message)" -ForegroundColor Red
             }
 
             # 👉 Track if any taskbar/explorer/context-menu tweak ran, so we restart Explorer once at the end
-            if ($fnName -in @("Set-TaskbarTweaks","Set-ExplorerTweaks","Enable-ClassicContextMenu","Enable-DarkMode")) {
+            if ($fnName -in @("Set-TaskbarTweaks", "Set-ExplorerTweaks", "Enable-ClassicContextMenu", "Enable-DarkMode")) {
                 $needsExplorerRestart = $true
             }
         }
@@ -1413,10 +1447,10 @@ function Show-MasterMenu {
 Show-MasterMenu
 
 # SIG # Begin signature block
-# MIIdkQYJKoZIhvcNAQcCoIIdgjCCHX4CAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIdkgYJKoZIhvcNAQcCoIIdgzCCHX8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD3ojlhvWyQW58G
-# +d4DMyTdJCfHsHIsiFNhLlDvn7r8XKCCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD5i8Cc0c/3GtT1
+# YNmb/4cI6UyBNvdgOeQ/WsNtXDViU6CCAz4wggM6MIICIqADAgECAhB7tTJ3UBw4
 # nkj+CleM2KE8MA0GCSqGSIb3DQEBCwUAMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQK
 # DAlNUkdBUkdTSVIxEjAQBgNVBAMMCU1SR0FSR1NJUjAeFw0yNTExMDUxMzI2MjNa
 # Fw0zMDExMDUxMzM2MjNaMDUxCzAJBgNVBAYTAklOMRIwEAYDVQQKDAlNUkdBUkdT
@@ -1433,142 +1467,142 @@ Show-MasterMenu
 # BKRZOyNtcc8kOFH7cyeIxEP660DJzcT30ZvPvR6FCHWCWqLpj9oHkp1dVDw8mWw7
 # Y8VJrWaDo5HZFyHZB7da93ID+PALskxAozUcg695qFOKbxs/MiuQMqC8R0orlM8h
 # ipVx9KsUUA0zG4ICve+EC14FpvNOZSc8aXCpXCVyAgcQ5teWoJ9bmGaFsStBoCQx
-# +jC+pyJCVVCtC0or+YRMeAI+yP2Dc8Z21hoRy6nXA8qofSbxlAMx5TGCGakwghml
+# +jC+pyJCVVCtC0or+YRMeAI+yP2Dc8Z21hoRy6nXA8qofSbxlAMx5TGCGaowghmm
 # AgEBMEkwNTELMAkGA1UEBhMCSU4xEjAQBgNVBAoMCU1SR0FSR1NJUjESMBAGA1UE
 # AwwJTVJHQVJHU0lSAhB7tTJ3UBw4nkj+CleM2KE8MA0GCWCGSAFlAwQCAQUAoIG4
 # MBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgor
-# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCvi+dVUGQXr7P807Wq6YvYpyhOzO0e
-# tRh68Ld5HSI5qzBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
+# BgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDJsLnL1375Y6NnMi6uhgNjEXndqb6X
+# T9k7kIbSJpPJJDBMBgorBgEEAYI3AgEMMT4wPKA6gDgAVwBpAG4AZABvAHcAcwAg
 # AFUAdABpAGwAaQB0AHkAIABiAHkAIABtAHIAZwBhAHIAZwBzAGkAcjANBgkqhkiG
-# 9w0BAQEFAASCAQCPBn+/ApoS5Yy4zpK97zi2ShJoRLD9S03bVvXlCuqYWMCX+KO/
-# RK58xHKJ0HZtSWWTlUKcQbk9+G4DITrQiecX2K47Gb83V77a5/dGOZAPal468DgS
-# rAlFAFnfaheez9gWQGJ+sTr9LwIBNsiIDY/lTZRCm9rEvHqhZekm19OrGi/XdBEE
-# t6LamM2rplx/xUcg3npAHJAIIQnh2iu/iFauXBFxNklCIKIdWlfeR2omsBrXH+B8
-# laOsYk+nYmo5v235WHVMpi4ydqd9O1uohYGo0p+5xbeoGq4yiAbSuWydB3sbJuTr
-# CJ/RNUfP6RQzbfUZLomJPC1d+v0guip1pdiloYIXdjCCF3IGCisGAQQBgjcDAwEx
-# ghdiMIIXXgYJKoZIhvcNAQcCoIIXTzCCF0sCAQMxDzANBglghkgBZQMEAgEFADB3
-# BgsqhkiG9w0BCRABBKBoBGYwZAIBAQYJYIZIAYb9bAcBMDEwDQYJYIZIAWUDBAIB
-# BQAEIPPj80PjFmfhKusZBrHRF+iHLGiuMm9/m1PmG8TZjPTQAhBTAWD+zRqIVchY
-# v6Lo+G8oGA8yMDI2MDgwMjEzMDcxOFqgghM6MIIG7TCCBNWgAwIBAgIQCoDvGEuN
-# 8QWC0cR2p5V0aDANBgkqhkiG9w0BAQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UE
-# ChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQg
-# VGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAw
-# MDAwMFoXDTM2MDkwMzIzNTk1OVowYzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRp
-# Z2lDZXJ0LCBJbmMuMTswOQYDVQQDEzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBU
-# aW1lc3RhbXAgUmVzcG9uZGVyIDIwMjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBANBGrC0Sxp7Q6q5gVrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx
-# +wvA69HFTBdwbHwBSOeLpvPnZ8ZN+vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvN
-# Zh6wW2R6kSu9RJt/4QhguSssp3qome7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlL
-# nh00Cll8pjrUcCV3K3E0zz09ldQ//nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmn
-# cOOMA3CoB/iUSROUINDT98oksouTMYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhw
-# UmotuQhcg9tw2YD3w6ySSSu+3qU8DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL
-# 4Q1OpbybpMe46YceNA0LfNsnqcnpJeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnD
-# uSeHVZlc4seAO+6d2sC26/PQPdP51ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCy
-# FG1roSrgHjSHlq8xymLnjCbSLZ49kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7a
-# SUROwnu7zER6EaJ+AliL7ojTdS5PWPsWeupWs7NpChUk555K096V1hE0yZIXe+gi
-# AwW00aHzrDchIc2bQhpp0IoKRR7YufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGj
-# ggGVMIIBkTAMBgNVHRMBAf8EAjAAMB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBD
-# z2GM6DAfBgNVHSMEGDAWgBTvb1NK6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8E
-# BAMCB4AwFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGF
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUH
-# MAKGUWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRH
-# NFRpbWVTdGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBW
-# MFSgUqBQhk5odHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVk
-# RzRUaW1lU3RhbXBpbmdSU0E0MDk2U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkw
-# FzAIBgZngQwBBAIwCwYJYIZIAYb9bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3x
-# HCcEua5gQezRCESeY0ByIfjk9iJP2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh
-# 8/YmRDfxT7C0k8FUFqNh+tshgb4O6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZS
-# e2F8AQ/UdKFOtj7YMTmqPO9mzskgiC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/
-# JQ/EABgfZXLWU0ziTN6R3ygQBHMUBaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1u
-# NnzQVTeLni2nHkX/QqvXnNb+YkDFkxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq
-# 8/gVutDojBIFeRlqAcuEVT0cKsb+zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwi
-# CZ85EE8LUkqRhoS3Y50OHgaY7T/lwd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ
-# +8Hggt8l2Yv7roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1
-# R9xJgKf47CdxVRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstr
-# niLvUxxVZE/rptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWu
-# iC7POGT75qaL6vdCvHlshtjdNXOCIUjsarfNZzCCBrQwggScoAMCAQICEA3HrFcF
-# /yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjELMAkGA1UEBhMCVVMxFTATBgNV
-# BAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEhMB8G
-# A1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0MB4XDTI1MDUwNzAwMDAwMFoX
-# DTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0
-# LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGlu
-# ZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIwDQYJKoZIhvcNAQEBBQADggIP
-# ADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0tFEXnU2tjQ2UtZmWgyxU7UNq
-# EY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLrC6Kbltqn7SWCWgzbNfiR+2fk
-# HUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DFUF0mR/vtLa4+gKPsYfwEu7EE
-# bkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVwxKSpO0XaF9DPfNBKS7Zazch8
-# NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb+zzQWKhxKTVVgtmUPAW35xUU
-# FREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9IaaGBpPNXKFifinT7zL2gdFpBP
-# 9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVmUB5KlCX3ZA4x5HHKS+rqBvKW
-# xdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30yZ46t4Y9F20HHfIY4/6vHespY
-# MQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqztiT96Fv/9bH7mQyogxG9QEPHrP
-# V6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZGKdlsjg4u70EwgWbVRSX1Wd4+
-# zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpfm4CLKczsG7ZrIGNTAgMBAAGj
-# ggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBTvb1NK6eQGfHrK
-# 4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFdZEzfLmc/57qYrhwPTzAOBgNV
-# HQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUHAwgwdwYIKwYBBQUHAQEEazBp
-# MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQQYIKwYBBQUH
-# MAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRS
-# b290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3JsMCAGA1UdIAQZMBcwCAYGZ4EM
-# AQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAF877FoAc/gc9EXZx
-# ML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNpoV2V4wzSUGvI9NAzaoQk97fr
-# PBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG+tXqGpYZ3essBS3q8nL2UwM+
-# NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQXwcAEGCvRR2qKtntujB71WPYA
-# gwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOal95CHfmTnM4I+ZI2rVQfjXQA
-# 1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9nEC8EAqoxW6q17r0z0noDjs6+
-# BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTCW/NmKLJ9M+MtucVGyOxiDf06
-# VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6FndlENSmE+9JGYxOGLS/D284
-# NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eCkhSxZON3rGlHqhpB/8MluDez
-# ooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4ssd8xHZnIn/7GELH3IdvG2XlM
-# 9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZapsiI5YKdvlarEvf8EA+8hcpS
-# M9LHJmyrxaFtoza2zNaQ9k+5t1wwggWNMIIEdaADAgECAhAOmxiO+dAt5+/bUOII
-# QBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdp
-# Q2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNVBAMTG0Rp
-# Z2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBaFw0zMTEx
-# MDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMx
-# GTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lDZXJ0IFRy
-# dXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBAL/m
-# kHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC4SmnPVirdprNrnsbhA3EMB/zG6Q4
-# FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWlfr6fqVcWWVVyr2iTcMKyunWZanMy
-# lNEQRBAu34LzB4TmdDttceItDBvuINXJIB1jKS3O7F5OyJP4IWGbNOsFxl7sWxq8
-# 68nPzaw0QF+xembud8hIqGZXV59UWI4MK7dPpzDZVu7Ke13jrclPXuU15zHL2pNe
-# 3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3pC4FfYj1gj4QkXCrVYJBMtfbBHMq
-# bpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJpMLmqaBn3aQnvKFPObURWBf3JFxG
-# j2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aadMreSx7nDmOu5tTvkpI6nj3cAORF
-# JYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXDj/chsrIRt7t/8tWMcCxBYKqxYxhE
-# lRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB4Q+UDCEdslQpJYls5Q5SUUd0vias
-# tkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ33xMdT9j7CFfxCBRa2+xq4aLT8LW
-# RV+dIPyhHsXAj6KxfgommfXkaS+YHS312amyHeUbAgMBAAGjggE6MIIBNjAPBgNV
-# HRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC0nFdZEzfLmc/57qYrhwPTzAfBgNV
-# HSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzAOBgNVHQ8BAf8EBAMCAYYweQYI
-# KwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5j
-# b20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdp
-# Q2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYDVR0fBD4wPDA6oDigNoY0aHR0cDov
-# L2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENBLmNybDAR
-# BgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcNAQEMBQADggEBAHCgv0NcVec4X6Cj
-# dBs9thbX979XB72arKGHLOyFXqkauyL4hxppVCLtpIh3bb0aFPQTSnovLbc47/T/
-# gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6mouyXtTP0UNEm0Mh65ZyoUi0mcud
-# T6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPHh6jSTEAZNUZqaVSwuKFWjuyk1T3o
-# sdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCNNWAcAgPLILCsWKAOQGPFmCLBsln1
-# VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg62fC2h5b9W9FcrBjDTZ9ztwGpn1eq
-# XijiuZQxggN8MIIDeAIBATB9MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3Rh
-# bXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgw
-# DQYJYIZIAWUDBAIBBQCggdEwGgYJKoZIhvcNAQkDMQ0GCyqGSIb3DQEJEAEEMBwG
-# CSqGSIb3DQEJBTEPFw0yNjA4MDIxMzA3MThaMCsGCyqGSIb3DQEJEAIMMRwwGjAY
-# MBYEFN1iMKyGCi0wa9o4sWh5UjAH+0F+MC8GCSqGSIb3DQEJBDEiBCAtIHFrxh8o
-# 7wb6//aadZbxx5ghQmUHtjpS3Qs93eG7yjA3BgsqhkiG9w0BCRACLzEoMCYwJDAi
-# BCBKoD+iLNdchMVck4+CjmdrnK7Ksz/jbSaaozTxRhEKMzANBgkqhkiG9w0BAQEF
-# AASCAgCwjHntSyv6bn7EZrXYDVLkCO+L85aOoNbSPyg5LYO4pQKiR9RozmT6C4/d
-# O6LV6ZgOGj+R0RqUEW6fapEd8CMO0JArcIZhYONUeKgpujir9MxFPxl4oVFWJYvM
-# U70GMDAO6plekfOc6vX5LVvChcddFw9SYP32l03Bi9Oq0uVOQM6j1V5DKCGMupbB
-# j4g2qfEkGOce2k5jPOmgir5VB/X7WF6ThphvY/JlAue8VexASwgO0vq7WjCtMMco
-# e2QoBcItoyeGgMchMJtQEMUl4lBQxVSfjAwsYO+znbx4MbiaK5DDOsPpy81OMaPD
-# XSbln7/R+cUSKKoB0pF/K/ZW6HIuFMIVP7upw2HzhF6Au78KGZun0O0ge11qWQ5r
-# Zo9wsWDDidaboRDWgswRAJkVBaaX+he2tWO1d00PyV0ojFzJFpUYVEUEwh/N5chL
-# JCYUYEFWV55PoTY3mk43t5IVF89CxQqf9yJNDRy6DLxUA4tsLU/mMlUZLpyCUKMy
-# LoLK3c1pDHYutiv8opYNN1yIIFspHIaAx83CLtfmQB98UV9jVPfM6NRZxxPxc8+x
-# 9xc8SndLZTwYHmWBK+gTB3/0XUfyCKkwIItK7E9xSnsUxKVqYy1s2PN0zI2xis4d
-# CL3ZIHox/s/j6dNs1ZVTOtrlVKzYPVjpW8CkGs3YvMbSLqgvrA==
+# 9w0BAQEFAASCAQBEy4TQqezLVbVZBejw3CZj4K9+jXgLoX62hr3e1cxTKM2CYSX8
+# ZkcxbxeRrEmc7X/xrJoQ8nLgmPqSAeZ2mSsxiLvQnOBTq4v5L/WSXdyo3lwQc8hC
+# Eo7vQFdI3xq6D/UZlT9VCHhKRD7k+6LmOtomqT7LUOiIt4cow56FpQYCsTBjV3bu
+# EMYbvgf/Z38Ksu1MMEXG+ZgaO+MzIIhHoTLJH7S1DTfr7dhNGK/jh2KIwnG4862b
+# hGoAkjT6Gyuj9m9s19AXUB2ATtG2Q9V1NNi150uv+9biIUVa3427o7fVJwjISvBP
+# KkKMhDa3fwVmrvc1G9jw3eRDACtM7YJbOEb8oYIXdzCCF3MGCisGAQQBgjcDAwEx
+# ghdjMIIXXwYJKoZIhvcNAQcCoIIXUDCCF0wCAQMxDzANBglghkgBZQMEAgEFADB4
+# BgsqhkiG9w0BCRABBKBpBGcwZQIBAQYJYIZIAYb9bAcBMDEwDQYJYIZIAWUDBAIB
+# BQAEIFZDbRhFVwagFXNY3wSBUnAA9eT4Ay9J9aArR5r5t7a3AhEAz4X2D/NmeNYc
+# 40+O1belZRgPMjAyNjA4MDMyMjE5MjhaoIITOjCCBu0wggTVoAMCAQICEAqA7xhL
+# jfEFgtHEdqeVdGgwDQYJKoZIhvcNAQELBQAwaTELMAkGA1UEBhMCVVMxFzAVBgNV
+# BAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVkIEc0
+# IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTAeFw0yNTA2MDQw
+# MDAwMDBaFw0zNjA5MDMyMzU5NTlaMGMxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
+# aWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgU0hBMjU2IFJTQTQwOTYg
+# VGltZXN0YW1wIFJlc3BvbmRlciAyMDI1IDEwggIiMA0GCSqGSIb3DQEBAQUAA4IC
+# DwAwggIKAoICAQDQRqwtEsae0OquYFazK1e6b1H/hnAKAd/KN8wZQjBjMqiZ3xTW
+# cfsLwOvRxUwXcGx8AUjni6bz52fGTfr6PHRNv6T7zsf1Y/E3IU8kgNkeECqVQ+3b
+# zWYesFtkepErvUSbf+EIYLkrLKd6qJnuzK8Vcn0DvbDMemQFoxQ2Dsw4vEjoT1Fp
+# S54dNApZfKY61HAldytxNM89PZXUP/5wWWURK+IfxiOg8W9lKMqzdIo7VA1R0V3Z
+# p3DjjANwqAf4lEkTlCDQ0/fKJLKLkzGBTpx6EYevvOi7XOc4zyh1uSqgr6UnbksI
+# cFJqLbkIXIPbcNmA98Oskkkrvt6lPAw/p4oDSRZreiwB7x9ykrjS6GS3NR39iTTF
+# S+ENTqW8m6THuOmHHjQNC3zbJ6nJ6SXiLSvw4Smz8U07hqF+8CTXaETkVWz0dVVZ
+# w7knh1WZXOLHgDvundrAtuvz0D3T+dYaNcwafsVCGZKUhQPL1naFKBy1p6llN3Qg
+# shRta6Eq4B40h5avMcpi54wm0i2ePZD5pPIssoszQyF4//3DoK2O65Uck5Wggn8O
+# 2klETsJ7u8xEehGifgJYi+6I03UuT1j7FnrqVrOzaQoVJOeeStPeldYRNMmSF3vo
+# IgMFtNGh86w3ISHNm0IaadCKCkUe2LnwJKa8TIlwCUNVwppwn4D3/Pt5pwIDAQAB
+# o4IBlTCCAZEwDAYDVR0TAQH/BAIwADAdBgNVHQ4EFgQU5Dv88jHt/f3X85FxYxlQ
+# Q89hjOgwHwYDVR0jBBgwFoAU729TSunkBnx6yuKQVvYv1Ensy04wDgYDVR0PAQH/
+# BAQDAgeAMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMIMIGVBggrBgEFBQcBAQSBiDCB
+# hTAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMF0GCCsGAQUF
+# BzAChlFodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVk
+# RzRUaW1lU3RhbXBpbmdSU0E0MDk2U0hBMjU2MjAyNUNBMS5jcnQwXwYDVR0fBFgw
+# VjBUoFKgUIZOaHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3Rl
+# ZEc0VGltZVN0YW1waW5nUlNBNDA5NlNIQTI1NjIwMjVDQTEuY3JsMCAGA1UdIAQZ
+# MBcwCAYGZ4EMAQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsFAAOCAgEAZSqt
+# 8RwnBLmuYEHs0QhEnmNAciH45PYiT9s1i6UKtW+FERp8FgXRGQ/YAavXzWjZhY+h
+# IfP2JkQ38U+wtJPBVBajYfrbIYG+Dui4I4PCvHpQuPqFgqp1PzC/ZRX4pvP/ciZm
+# UnthfAEP1HShTrY+2DE5qjzvZs7JIIgt0GCFD9ktx0LxxtRQ7vllKluHWiKk6FxR
+# PyUPxAAYH2Vy1lNM4kzekd8oEARzFAWgeW3az2xejEWLNN4eKGxDJ8WDl/FQUSnt
+# bjZ80FU3i54tpx5F/0Kr15zW/mJAxZMVBrTE2oi0fcI8VMbtoRAmaaslNXdCG1+l
+# qvP4FbrQ6IwSBXkZagHLhFU9HCrG/syTRLLhAezu/3Lr00GrJzPQFnCEH1Y58678
+# IgmfORBPC1JKkYaEt2OdDh4GmO0/5cHelAK2/gTlQJINqDr6JfwyYHXSd+V08X1J
+# UPvB4ILfJdmL+66Gp3CSBXG6IwXMZUXBhtCyIaehr0XkBoDIGMUG1dUtwq1qmcwb
+# dUfcSYCn+OwncVUXf53VJUNOaMWMts0VlRYxe5nK+At+DI96HAlXHAL5SlfYxJ7L
+# a54i71McVWRP66bW+yERNpbJCjyCYG2j+bdpxo/1Cy4uPcU3AWVPGrbn5PhDBf3F
+# roguzzhk++ami+r3Qrx5bIbY3TVzgiFI7Gq3zWcwgga0MIIEnKADAgECAhANx6xX
+# Bf8hmS5AQyIMOkmGMA0GCSqGSIb3DQEBCwUAMGIxCzAJBgNVBAYTAlVTMRUwEwYD
+# VQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAf
+# BgNVBAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDAeFw0yNTA1MDcwMDAwMDBa
+# Fw0zODAxMTQyMzU5NTlaMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2Vy
+# dCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBp
+# bmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwggIiMA0GCSqGSIb3DQEBAQUAA4IC
+# DwAwggIKAoICAQC0eDHTCphBcr48RsAcrHXbo0ZodLRRF51NrY0NlLWZloMsVO1D
+# ahGPNRcybEKq+RuwOnPhof6pvF4uGjwjqNjfEvUi6wuim5bap+0lgloM2zX4kftn
+# 5B1IpYzTqpyFQ/4Bt0mAxAHeHYNnQxqXmRinvuNgxVBdJkf77S2uPoCj7GH8BLux
+# BG5AvftBdsOECS1UkxBvMgEdgkFiDNYiOTx4OtiFcMSkqTtF2hfQz3zQSku2Ws3I
+# fDReb6e3mmdglTcaarps0wjUjsZvkgFkriK9tUKJm/s80FiocSk1VYLZlDwFt+cV
+# FBURJg6zMUjZa/zbCclF83bRVFLeGkuAhHiGPMvSGmhgaTzVyhYn4p0+8y9oHRaQ
+# T/aofEnS5xLrfxnGpTXiUOeSLsJygoLPp66bkDX1ZlAeSpQl92QOMeRxykvq6gby
+# lsXQskBBBnGy3tW/AMOMCZIVNSaz7BX8VtYGqLt9MmeOreGPRdtBx3yGOP+rx3rK
+# WDEJlIqLXvJWnY0v5ydPpOjL6s36czwzsucuoKs7Yk/ehb//Wx+5kMqIMRvUBDx6
+# z1ev+7psNOdgJMoiwOrUG2ZdSoQbU2rMkpLiQ6bGRinZbI4OLu9BMIFm1UUl9Vne
+# Ps6BaaeEWvjJSjNm2qA+sdFUeEY0qVjPKOWug/G6X5uAiynM7Bu2ayBjUwIDAQAB
+# o4IBXTCCAVkwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU729TSunkBnx6
+# yuKQVvYv1Ensy04wHwYDVR0jBBgwFoAU7NfjgtJxXWRM3y5nP+e6mK4cD08wDgYD
+# VR0PAQH/BAQDAgGGMBMGA1UdJQQMMAoGCCsGAQUFBwMIMHcGCCsGAQUFBwEBBGsw
+# aTAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEEGCCsGAQUF
+# BzAChjVodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVk
+# Um9vdEc0LmNydDBDBgNVHR8EPDA6MDigNqA0hjJodHRwOi8vY3JsMy5kaWdpY2Vy
+# dC5jb20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNybDAgBgNVHSAEGTAXMAgGBmeB
+# DAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBABfO+xaAHP4HPRF2
+# cTC9vgvItTSmf83Qh8WIGjB/T8ObXAZz8OjuhUxjaaFdleMM0lBryPTQM2qEJPe3
+# 6zwbSI/mS83afsl3YTj+IQhQE7jU/kXjjytJgnn0hvrV6hqWGd3rLAUt6vJy9lMD
+# PjTLxLgXf9r5nWMQwr8Myb9rEVKChHyfpzee5kH0F8HABBgr0UdqirZ7bowe9Vj2
+# AIMD8liyrukZ2iA/wdG2th9y1IsA0QF8dTXqvcnTmpfeQh35k5zOCPmSNq1UH410
+# ANVko43+Cdmu4y81hjajV/gxdEkMx1NKU4uHQcKfZxAvBAKqMVuqte69M9J6A47O
+# vgRaPs+2ykgcGV00TYr2Lr3ty9qIijanrUR3anzEwlvzZiiyfTPjLbnFRsjsYg39
+# OlV8cipDoq7+qNNjqFzeGxcytL5TTLL4ZaoBdqbhOhZ3ZRDUphPvSRmMThi0vw9v
+# ODRzW6AxnJll38F0cuJG7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3
+# s6KCLPAlZ66RzIg9sC+NJpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5
+# TPau1j/1MIDpMPx0LckTetiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXK
+# UjPSxyZsq8WhbaM2tszWkPZPubdcMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21Di
+# CEAYWjANBgkqhkiG9w0BAQwFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGln
+# aUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtE
+# aWdpQ2VydCBBc3N1cmVkIElEIFJvb3QgQ0EwHhcNMjIwODAxMDAwMDAwWhcNMzEx
+# MTA5MjM1OTU5WjBiMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5j
+# MRkwFwYDVQQLExB3d3cuZGlnaWNlcnQuY29tMSEwHwYDVQQDExhEaWdpQ2VydCBU
+# cnVzdGVkIFJvb3QgRzQwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQC/
+# 5pBzaN675F1KPDAiMGkz7MKnJS7JIT3yithZwuEppz1Yq3aaza57G4QNxDAf8xuk
+# OBbrVsaXbR2rsnnyyhHS5F/WBTxSD1Ifxp4VpX6+n6lXFllVcq9ok3DCsrp1mWpz
+# MpTREEQQLt+C8weE5nQ7bXHiLQwb7iDVySAdYyktzuxeTsiT+CFhmzTrBcZe7Fsa
+# vOvJz82sNEBfsXpm7nfISKhmV1efVFiODCu3T6cw2Vbuyntd463JT17lNecxy9qT
+# XtyOj4DatpGYQJB5w3jHtrHEtWoYOAMQjdjUN6QuBX2I9YI+EJFwq1WCQTLX2wRz
+# Km6RAXwhTNS8rhsDdV14Ztk6MUSaM0C/CNdaSaTC5qmgZ92kJ7yhTzm1EVgX9yRc
+# Ro9k98FpiHaYdj1ZXUJ2h4mXaXpI8OCiEhtmmnTK3kse5w5jrubU75KSOp493ADk
+# RSWJtppEGSt+wJS00mFt6zPZxd9LBADMfRyVw4/3IbKyEbe7f/LVjHAsQWCqsWMY
+# RJUadmJ+9oCw++hkpjPRiQfhvbfmQ6QYuKZ3AeEPlAwhHbJUKSWJbOUOUlFHdL4m
+# rLZBdd56rF+NP8m800ERElvlEFDrMcXKchYiCd98THU/Y+whX8QgUWtvsauGi0/C
+# 1kVfnSD8oR7FwI+isX4KJpn15GkvmB0t9dmpsh3lGwIDAQABo4IBOjCCATYwDwYD
+# VR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQU7NfjgtJxXWRM3y5nP+e6mK4cD08wHwYD
+# VR0jBBgwFoAUReuir/SSy4IxLVGLp6chnfNtyA8wDgYDVR0PAQH/BAQDAgGGMHkG
+# CCsGAQUFBwEBBG0wazAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQu
+# Y29tMEMGCCsGAQUFBzAChjdodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGln
+# aUNlcnRBc3N1cmVkSURSb290Q0EuY3J0MEUGA1UdHwQ+MDwwOqA4oDaGNGh0dHA6
+# Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcmww
+# EQYDVR0gBAowCDAGBgRVHSAAMA0GCSqGSIb3DQEBDAUAA4IBAQBwoL9DXFXnOF+g
+# o3QbPbYW1/e/Vwe9mqyhhyzshV6pGrsi+IcaaVQi7aSId229GhT0E0p6Ly23OO/0
+# /4C5+KH38nLeJLxSA8hO0Cre+i1Wz/n096wwepqLsl7Uz9FDRJtDIeuWcqFItJnL
+# nU+nBgMTdydE1Od/6Fmo8L8vC6bp8jQ87PcDx4eo0kxAGTVGamlUsLihVo7spNU9
+# 6LHc/RzY9HdaXFSMb++hUD38dglohJ9vytsgjTVgHAIDyyCwrFigDkBjxZgiwbJZ
+# 9VVrzyerbHbObyMt9H5xaiNrIv8SuFQtJ37YOtnwtoeW/VvRXKwYw02fc7cBqZ9X
+# ql4o4rmUMYIDfDCCA3gCAQEwfTBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGln
+# aUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0
+# YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExAhAKgO8YS43xBYLRxHanlXRo
+# MA0GCWCGSAFlAwQCAQUAoIHRMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAc
+# BgkqhkiG9w0BCQUxDxcNMjYwODAzMjIxOTI4WjArBgsqhkiG9w0BCRACDDEcMBow
+# GDAWBBTdYjCshgotMGvaOLFoeVIwB/tBfjAvBgkqhkiG9w0BCQQxIgQgpiBTJqNA
+# a2/nSZUBjpVVZpdKtp5IUL1iSMg0Bz2frK8wNwYLKoZIhvcNAQkQAi8xKDAmMCQw
+# IgQgSqA/oizXXITFXJOPgo5na5yuyrM/420mmqM08UYRCjMwDQYJKoZIhvcNAQEB
+# BQAEggIAJ437tsVEDrhv5GsDhU6XVUjzFN8z3sfoqxdjp3DIn7qGCKNNLJ5VXxkD
+# EmAGsKiEF1HuaqaGJX095D7M5T9GcQUkcRGhx5cd+/TETDNPWGwYNYKX1JRMPwEy
+# nTlYgapGO1XVqLZ0ex11D1beYtnDfL3Bkwg4LGdEPjqxpg+Vea7HRAepBadBfCu3
+# muo7M5/aItMLzjNfzbcO+vi/GUGa3Ur5jpq72UoI64PxUluonkac16WNQ7Y89ual
+# HUzl8/uGzOw5yWk/V0cRCqPgT23ikW2/xdhbhH/PpvUfleKbfKD2HNSDRHoq/+rY
+# KxY+U7chN9rpDUK9xM2/qnW/zRtLMmxXHIuHo9hek8jdwLNvJMmAIwJl2qyVjBHj
+# cG0/W7R1N9Xt2sGMYupkG2PtZppPXAEh7F0DW6bw7w2/owRihK3H3Yjc3GWMcr8v
+# EiUGG6LXU21yfhIPE1Ud8iUTnb63/CAjdD7+o/R7y/JPMouERMoHi8omvn5yhCSU
+# LlbfN/kFlPCDPLT2Hb/KtlvtqR1tjcyB0RpiQ+ThdD5XlDpgbrxJYcpLm7s6b5sS
+# fyBs1BbVgHIjCGU+V7/VPcc8bfP6efg+YWbIcvebjsm9sf0eGWctfTh+In2cKQ8U
+# 25YVjOyk5x4kumtx4PsQ9pyk8K07IvaSKZ4b/Zhj/rZfTHZXqU0=
 # SIG # End signature block
