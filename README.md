@@ -19,16 +19,9 @@ irm https://mrgargsir.github.io/winsetup/setup.ps1 | iex
 ```
 
 ```powershell
-irm https://mrgargsir.github.io/winsetup/autosetup.ps1 | iex
-```
-
-```powershell
 irm https://winsetup.mrgargsir.store/setup.ps1 | iex
 ```
 
-```powershell
-irm https://winsetup.mrgargsir.store/autosetup.ps1 | iex
-```
 
 This downloads and runs the script directly — no need to clone the repo or save any files. A checkbox menu window will appear letting you choose which tweaks to apply.
 
