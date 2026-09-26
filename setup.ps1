@@ -1351,6 +1351,147 @@ function Clear-TempAndUpdateCache {
     Write-Host "[+] Temp files and Update cache cleared." -ForegroundColor Green
 }
 
+# ---------------- SECTION: REGION & LANGUAGE = INDIA / ENGLISH (INDIA) ----------------
+# 👉 Sets Home Location (Region), Formats (date/time/currency), Input+Display language,
+# 👉 System locale (for non-Unicode apps) and Time Zone all to India / English (India).
+# 👉 Not available on Win7/8/8.1 (Set-WinUserLanguageList etc. need Win8.1+/Win10+).
+function Set-RegionLanguageIndia {
+    Write-Host "`n[*] Setting Region = India and Language = English (India)..." -ForegroundColor Cyan
+
+    if ($script:IsWin81OrOlder) {
+        Write-Host "  Skipped - this needs Windows 8.1 or newer. Set it manually via Control Panel > Region." -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        # 👉 Region (Home Location) = India, GeoID 113
+        Set-WinHomeLocation -GeoId 113 -ErrorAction Stop
+        Write-Host "  Home location (Region) set to India." -ForegroundColor DarkGray
+    }
+    catch { Write-Host "  Could not set home location: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+    try {
+        # 👉 Formats (dates/time/currency/numbers) = English (India)
+        Set-Culture en-IN -ErrorAction Stop
+        Write-Host "  Formats (date/time/currency) set to English (India)." -ForegroundColor DarkGray
+    }
+    catch { Write-Host "  Could not set formats/culture: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+    try {
+        # 👉 Input/Display language = English (India), added as primary while keeping
+        # 👉 any other languages/keyboards already installed (so we don't wipe out e.g. Hindi)
+        $existingList = Get-WinUserLanguageList -ErrorAction Stop
+        $languageList = New-WinUserLanguageList -Language "en-IN"
+        foreach ($lang in $existingList) {
+            if ($lang.LanguageTag -ne "en-IN") { $languageList.Add($lang) }
+        }
+        Set-WinUserLanguageList -LanguageList $languageList -Force -ErrorAction Stop
+        Write-Host "  Input/display language set to English (India)." -ForegroundColor DarkGray
+    }
+    catch { Write-Host "  Could not set language list: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+    try {
+        # 👉 System locale (used by legacy non-Unicode apps) = English (India) - needs a restart to fully apply
+        Set-WinSystemLocale -SystemLocale en-IN -ErrorAction Stop
+        Write-Host "  System locale set to English (India) (takes effect after restart)." -ForegroundColor DarkGray
+    }
+    catch { Write-Host "  Could not set system locale: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+    try {
+        # 👉 Time zone = India Standard Time
+        Set-TimeZone -Id "India Standard Time" -ErrorAction Stop
+        Write-Host "  Time zone set to India Standard Time." -ForegroundColor DarkGray
+    }
+    catch { Write-Host "  Could not set time zone: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+    Write-Host "[+] Region/Language set to India / English (India). Sign out and back in (or restart) for it to apply everywhere." -ForegroundColor Green
+}
+
+# ---------------- SECTION: DEEP JUNK CLEANUP (360 Total Security style) ----------------
+# 👉 Goes beyond Clear-TempAndUpdateCache: browser caches, crash dumps/WER, thumbnail cache,
+# 👉 Delivery Optimization cache, stale logs, DNS cache, and temp files for EVERY user profile.
+function Clear-DeepJunkFiles {
+    Write-Host "`n[*] Running deep junk cleanup (browser caches, crash dumps, thumbnails, logs)..." -ForegroundColor Cyan
+
+    # 👉 Browser caches - Chrome, Edge, Firefox (best run while the browser is closed, but safe either way)
+    $cachePaths = @(
+        "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache*",
+        "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache*",
+        "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache*",
+        "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Code Cache*"
+    )
+    foreach ($path in $cachePaths) {
+        Write-Host "  Clearing: $path" -ForegroundColor DarkGray
+        Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Get-Item "$env:APPDATA\Mozilla\Firefox\Profiles\*\cache2" -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "  Clearing: $($_.FullName)" -ForegroundColor DarkGray
+        Remove-Item -Path "$($_.FullName)\*" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # 👉 Windows Error Reporting queue/archive + crash dumps
+    Remove-Item -Path "$env:ProgramData\Microsoft\Windows\WER\ReportQueue\*" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:ProgramData\Microsoft\Windows\WER\ReportArchive\*" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:LOCALAPPDATA\CrashDumps\*" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:WINDIR\Minidump\*" -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:WINDIR\MEMORY.DMP" -Force -ErrorAction SilentlyContinue
+
+    # 👉 Thumbnail + icon cache
+    Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\thumbcache_*.db" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\iconcache_*.db" -Force -ErrorAction SilentlyContinue
+
+    # 👉 Delivery Optimization cache (peer-to-peer Windows Update cache)
+    Remove-Item -Path "$env:WINDIR\SoftwareDistribution\DeliveryOptimization\*" -Recurse -Force -ErrorAction SilentlyContinue
+
+    # 👉 Old CBS/setup log files
+    Remove-Item -Path "$env:WINDIR\Logs\CBS\*.log" -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path "$env:WINDIR\Panther\*.log" -Force -ErrorAction SilentlyContinue
+
+    # 👉 DNS resolver cache - stale entries slow down browsing, same as the "network junk" scan in 360-style cleaners
+    Start-Process ipconfig -ArgumentList "/flushdns" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+
+    # 👉 %TEMP% for every user profile on the machine, not just the one running this script
+    Get-ChildItem "$env:SystemDrive\Users" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $userTemp = Join-Path $_.FullName "AppData\Local\Temp"
+        if (Test-Path $userTemp) {
+            Write-Host "  Clearing: $userTemp" -ForegroundColor DarkGray
+            Remove-Item -Path "$userTemp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Write-Host "[+] Deep junk cleanup complete." -ForegroundColor Green
+}
+
+# ---------------- SECTION: MEMORY BOOST (360 Total Security "Boost" style) ----------------
+# 👉 Trims the working set of every running process so Windows reclaims idle RAM back to "Available".
+# 👉 Safe: this doesn't kill or touch any process, it just asks Windows to page out unused memory.
+function Optimize-MemoryBoost {
+    Write-Host "`n[*] Boosting available memory (trimming idle app memory usage)..." -ForegroundColor Cyan
+
+    try {
+        Add-Type -Namespace Win32 -Name Native -MemberDefinition '
+            [DllImport("psapi.dll")]
+            public static extern bool EmptyWorkingSet(IntPtr hProcess);
+        ' -ErrorAction Stop
+    }
+    catch {}
+
+    $before = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).FreePhysicalMemory
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $PID } | ForEach-Object {
+        try { [Win32.Native]::EmptyWorkingSet($_.Handle) | Out-Null } catch {}
+    }
+    Start-Sleep -Milliseconds 500
+    $after = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).FreePhysicalMemory
+
+    if ($before -and $after) {
+        $freedMB = [math]::Round(([math]::Max(0, $after - $before)) / 1024, 1)
+        Write-Host "[+] Memory boost complete. Freed approx. $freedMB MB." -ForegroundColor Green
+    }
+    else {
+        Write-Host "[+] Memory boost complete." -ForegroundColor Green
+    }
+}
+
 # ---------------- SECTION 15: UPDATE ALL APPS (REVISED - STABLE-ONLY, DETAILED GUI) ----------------
 function Update-AllApps {
     Write-Host "`n[*] Checking for app updates..." -ForegroundColor Cyan
@@ -1643,12 +1784,7 @@ function Set-NetworkOptimizations {
     Set-ItemProperty -Path $gpPath -Name "GpNetworkStartTimeoutPolicyValue" -Value 0 -Type DWord -Force
     Write-Host "NLA/GP network wait timeout disabled." -ForegroundColor DarkGray
 
-    # 2. Set DNS to Cloudflare (primary) + Google (secondary) on active adapters
-    $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
-    foreach ($adapter in $adapters) {
-        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("1.1.1.1", "8.8.8.8") -ErrorAction SilentlyContinue
-        Write-Host "DNS set to Cloudflare/Google on $($adapter.Name)." -ForegroundColor DarkGray
-    }
+    # 2. only flush dns
     ipconfig /flushdns | Out-Null
 
     # 3. Disable IPv6 if not needed (unbind, don't fully strip stack)
@@ -1784,11 +1920,14 @@ function Show-MasterMenu {
         "Check Windows Activation Status"                                            = @{ Fn = "Test-WindowsActivation"; Checked = $true }
         "Check MS Office Activation Status"                                          = @{ Fn = "Test-OfficeActivation"; Checked = $true }
         "Clean Temp Files + Windows Update Cache"                                    = @{ Fn = "Clear-TempAndUpdateCache"; Checked = $true }
+        "Set Region = India, Language = English (India)"                            = @{ Fn = "Set-RegionLanguageIndia"; Checked = $true }
+        "Deep Junk Cleanup (browser cache, crash dumps, thumbnails, logs, DNS)"      = @{ Fn = "Clear-DeepJunkFiles"; Checked = $true }
+        "Boost Memory (trim idle app RAM usage)"                                     = @{ Fn = "Optimize-MemoryBoost"; Checked = $true }
         "-- OPTIONAL EXTRAS BELOW --"                                                = @{ Fn = $null; Checked = $false }   # 👉 separator row, not clickable
         "Enable Classic Right-Click Context Menu"                                    = @{ Fn = "Enable-ClassicContextMenu"; Checked = $true }
         "Disable Lock Screen Ads / Tips"                                             = @{ Fn = "Disable-LockScreenAdsAndTips"; Checked = $true }
         "Enable Dark Mode"                                                           = @{ Fn = "Enable-DarkMode"; Checked = $false }
-        "Disable Cortana Web Search Results in Start Menu"                           = @{ Fn = "Disable-CortanaWebSearch"; Checked = $false }
+        "Disable Cortana Web Search Results in Start Menu"                           = @{ Fn = "Disable-CortanaWebSearch"; Checked = $true }
         "Performance-Focused Visual Effects"                                         = @{ Fn = "Set-PerformanceVisuals"; Checked = $false }
         "Repair Print Spooler & Font Cache"                                          = @{ Fn = "Repair-PrintAndFontCache"; Checked = $true }
         "Network Optimizations (NLA delay, DNS, IPv6)"                               = @{ Fn = "Set-NetworkOptimizations"; Checked = $true }
@@ -1935,11 +2074,13 @@ function Show-MasterMenu {
 # ============================================================
 Show-MasterMenu
 
+
+
 # SIG # Begin signature block
-# MIIdpAYJKoZIhvcNAQcCoIIdlTCCHZECAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIdowYJKoZIhvcNAQcCoIIdlDCCHZACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAttzju+AxAxhgK
-# 6DIVWMts5H3PAjZfKj1xSBTp6DLWJKCCA0owggNGMIICLqADAgECAhBtjPBz9YE3
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB1zFDpYDzBgnjc
+# Q0mrUOkYwFO0zwIIVXbZ+vaoCmr7fKCCA0owggNGMIICLqADAgECAhBtjPBz9YE3
 # vEvSL6JQoHDmMA0GCSqGSIb3DQEBCwUAMDsxCzAJBgNVBAYTAklOMRgwFgYDVQQK
 # DA9NUkdBUkdTSVIgVG9vbHMxEjAQBgNVBAMMCU1SR0FSR1NJUjAeFw0yNjA4MTEw
 # OTA4MjlaFw0zMTA4MTEwOTE4MjlaMDsxCzAJBgNVBAYTAklOMRgwFgYDVQQKDA9N
@@ -1957,142 +2098,142 @@ Show-MasterMenu
 # QI6Ng7YcZt6Bfgan+rk3jiZjLx6OSChAmkE1dob7HnGvPziEQOy0+TDPDicnmdH8
 # OWIRP9nVLKfkY5MnGFpW6erFBaMKiNN2xr2NypgB8fb3m2tMC/dXShciRnr2qv/h
 # bekXzzx/Mz8No05vsEGXGYXOHeAzwR1LOOnOE6qUpGMpVnhuRwlSf3ITnSLYKq28
-# lW/NkDGCGbAwghmsAgEBME8wOzELMAkGA1UEBhMCSU4xGDAWBgNVBAoMD01SR0FS
+# lW/NkDGCGa8wghmrAgEBME8wOzELMAkGA1UEBhMCSU4xGDAWBgNVBAoMD01SR0FS
 # R1NJUiBUb29sczESMBAGA1UEAwwJTVJHQVJHU0lSAhBtjPBz9YE3vEvSL6JQoHDm
 # MA0GCWCGSAFlAwQCAQUAoIG4MBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwG
-# CisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAwig0l
-# X9wcdLInZj0Vlj9XDnhG8xSgeer2xW+uGxMaOzBMBgorBgEEAYI3AgEMMT4wPKA6
+# CisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDAIGU7
+# +rPF2tpf6AXjZfqfEojCmXANtCGWTVJd/+lLzjBMBgorBgEEAYI3AgEMMT4wPKA6
 # gDgAVwBpAG4AZABvAHcAcwAgAFUAdABpAGwAaQB0AHkAIABiAHkAIABtAHIAZwBh
-# AHIAZwBzAGkAcjANBgkqhkiG9w0BAQEFAASCAQBps2jzrIe7Yj7xq+KAC9uvGznR
-# bKfqJ92Jw4kNFEJ6VS6L0ZsOWKg2m26mQronM7hKBJqi8htYykhdTsMkhC7b1/hz
-# IhyC/sfujwICSm4rQ9IvN+6pzLhskn6gS6CQdsyTMQLtu9/4wAg3f0J+PZ9ZeTRm
-# R96dxogGQqDnsAu0ckBIaD2GAE+LkVOeh0uPha5z///AwfLBk7DZDPKF8YxM1nVB
-# slM8BujAM5xJk/3um7j8E4dIEW5XvfQMd+n2oRfIrBcdOrvNMQpeibnabLPdQLpj
-# Eu3A903ztWWDJz93QutnqyyL8DYdFRtbu+QG53cPlGE43WGI5TCphlERRHEYoYIX
-# dzCCF3MGCisGAQQBgjcDAwExghdjMIIXXwYJKoZIhvcNAQcCoIIXUDCCF0wCAQMx
-# DzANBglghkgBZQMEAgEFADB4BgsqhkiG9w0BCRABBKBpBGcwZQIBAQYJYIZIAYb9
-# bAcBMDEwDQYJYIZIAWUDBAIBBQAEIMdBidyiMF95Z2OULQcFwTFU8ohB9NjWXimt
-# 77XTZbm2AhEAs+O+24VAECgSXKbt/6D8RhgPMjAyNjA5MTQwODA2MzBaoIITOjCC
-# Bu0wggTVoAMCAQICEAhP3DNPfkVO28MPj/mSGDUwDQYJKoZIhvcNAQELBQAwaTEL
-# MAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhE
-# aWdpQ2VydCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAy
-# MDI1IENBMTAeFw0yNjA4MDUwMDAwMDBaFw0zNzExMDQyMzU5NTlaMGMxCzAJBgNV
-# BAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNl
-# cnQgU0hBMjU2IFJTQTQwOTYgVGltZXN0YW1wIFJlc3BvbmRlciAyMDI2IDEwggIi
-# MA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQC2e6byyf7NSvjUm0xls/04xjD4
-# fAkOkbnGQi7+Wpx81iYxfzViaxSIctuH3KSl5YEYpMuFgGsA31N2D9ATMbfZdw5u
-# aAhuWevQKhDdZIB4NnqcfpfpWQXJiQnDdAElETC+bhSEvNLGbA8DtwUpFMQ4yyYQ
-# SPqomT92osQAv6hBi47ATZS6JfVWe6XxhF4jJZ3iSAuf2Cros1czRSmWRHqMv9Af
-# GZvp8ygYElhudpQjtcPpwoOl6QrZJUyV3iINvN4cO05prGV0fkjG426xDr2d3z9l
-# cSIHkdvGPdGUrXdxfVbgOUVcp2/8ISEzwKPW++Wa+E2ujI91EZtukGWDJ/xZ27k3
-# oHKEXBRGfRTqjOU+jE3ba/5++JSE/7oNHnjs5mekExYN96LV/mxUbCKJb8pBNY4r
-# 3uD7hEmk/M81XhVgwDA7aMzYC3LZBg9WY5BMmbSay5ecmtJuXaB/0nKWmQmVZeqT
-# VDgsmzHP5MQuhAJkiWNuC9MmCg9TZHXbJ2/yLVSov9p16UDTLtT0+aa1vN71fHeu
-# 1qMLlLNB3WOB/ADCxr3S/1hxI92Z6jKgEED/btwIvbfuXkNNhg8MtDg43c4tMZae
-# 9FvqMOt/9PvmAxF9TNIsIFB8G6yb36ZJZGUL8N/pL971DyLXcK6HM5PYnH5X+eVt
-# czhCgHCVQCF6XDAlPQIDAQABo4IBlTCCAZEwDAYDVR0TAQH/BAIwADAdBgNVHQ4E
-# FgQUFMljijAu1Er7bpTz5uNAfvXszeIwHwYDVR0jBBgwFoAU729TSunkBnx6yuKQ
-# VvYv1Ensy04wDgYDVR0PAQH/BAQDAgeAMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMI
-# MIGVBggrBgEFBQcBAQSBiDCBhTAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGln
-# aWNlcnQuY29tMF0GCCsGAQUFBzAChlFodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5j
+# AHIAZwBzAGkAcjANBgkqhkiG9w0BAQEFAASCAQA70xBg8s7TlorSbY/yD0bEYlw9
+# 6FW/Jlk/b2HI2cvwEAm+IeXbV1gamHJTrQI0V/lRYMMDgS2wiUxsjxLqijBqieGY
+# Lj+EwEJ51SZYtg1ZkPBZN/rv+MjWmerbqq8iw9PrQE85HY3iIhcQKNwq0p5tZC7L
+# oC4ks472bObYJo5DBz+I+i7yiNo0b/OoRIFqLyxWkJBxvlYyWPIiQ+NLZSgb2fe4
+# WehjSj+ExWUIdnDeTrex3+pvJHOn0i+O6nN/iaeZ1m6YAzm869oyQaZCaLi7qyN0
+# aj0DEIisnCXKU8g4mY2rgfjVqotTM3Pp7JexXE4qDIIx2WMLaDm6CMJY5x8loYIX
+# djCCF3IGCisGAQQBgjcDAwExghdiMIIXXgYJKoZIhvcNAQcCoIIXTzCCF0sCAQMx
+# DzANBglghkgBZQMEAgEFADB3BgsqhkiG9w0BCRABBKBoBGYwZAIBAQYJYIZIAYb9
+# bAcBMDEwDQYJYIZIAWUDBAIBBQAEIFK0B7olrJB+Gg2WjSwc8U1fwBE1FL8RxKoj
+# YFFeORclAhACRBrE+uXKydVYXIZlHjjoGA8yMDI2MDkyNjA1MDgyMFqgghM6MIIG
+# 7TCCBNWgAwIBAgIQCE/cM09+RU7bww+P+ZIYNTANBgkqhkiG9w0BAQsFADBpMQsw
+# CQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERp
+# Z2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIw
+# MjUgQ0ExMB4XDTI2MDgwNTAwMDAwMFoXDTM3MTEwNDIzNTk1OVowYzELMAkGA1UE
+# BhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQDEzJEaWdpQ2Vy
+# dCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIwMjYgMTCCAiIw
+# DQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALZ7pvLJ/s1K+NSbTGWz/TjGMPh8
+# CQ6RucZCLv5anHzWJjF/NWJrFIhy24fcpKXlgRiky4WAawDfU3YP0BMxt9l3Dm5o
+# CG5Z69AqEN1kgHg2epx+l+lZBcmJCcN0ASURML5uFIS80sZsDwO3BSkUxDjLJhBI
+# +qiZP3aixAC/qEGLjsBNlLol9VZ7pfGEXiMlneJIC5/YKuizVzNFKZZEeoy/0B8Z
+# m+nzKBgSWG52lCO1w+nCg6XpCtklTJXeIg283hw7TmmsZXR+SMbjbrEOvZ3fP2Vx
+# IgeR28Y90ZStd3F9VuA5RVynb/whITPAo9b75Zr4Ta6Mj3URm26QZYMn/FnbuTeg
+# coRcFEZ9FOqM5T6MTdtr/n74lIT/ug0eeOzmZ6QTFg33otX+bFRsIolvykE1jive
+# 4PuESaT8zzVeFWDAMDtozNgLctkGD1ZjkEyZtJrLl5ya0m5doH/ScpaZCZVl6pNU
+# OCybMc/kxC6EAmSJY24L0yYKD1Nkddsnb/ItVKi/2nXpQNMu1PT5prW83vV8d67W
+# owuUs0HdY4H8AMLGvdL/WHEj3ZnqMqAQQP9u3Ai9t+5eQ02GDwy0ODjdzi0xlp70
+# W+ow63/0++YDEX1M0iwgUHwbrJvfpklkZQvw3+kv3vUPItdwroczk9icflf55W1z
+# OEKAcJVAIXpcMCU9AgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAAMB0GA1UdDgQW
+# BBQUyWOKMC7USvtulPPm40B+9ezN4jAfBgNVHSMEGDAWgBTvb1NK6eQGfHrK4pBW
+# 9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgw
+# gZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdp
+# Y2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNv
+# bS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVTdGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1
+# Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5kaWdpY2VydC5j
 # b20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2U0hBMjU2MjAy
-# NUNBMS5jcnQwXwYDVR0fBFgwVjBUoFKgUIZOaHR0cDovL2NybDMuZGlnaWNlcnQu
-# Y29tL0RpZ2lDZXJ0VHJ1c3RlZEc0VGltZVN0YW1waW5nUlNBNDA5NlNIQTI1NjIw
-# MjVDQTEuY3JsMCAGA1UdIAQZMBcwCAYGZ4EMAQQCMAsGCWCGSAGG/WwHATANBgkq
-# hkiG9w0BAQsFAAOCAgEAjcU6YR6dUgrfmawJgH59KECxa9Ji8sEi2g10CBDaMiqs
-# axWyW5cwlT/6ZF5sFznazqVsoC85U9dqLOYqQwst+UQQoNlDHgKRLa3xoc+OReFr
-# eFhnTXSG0Vrd2E2CZqUfm+5a+He1MJ/h+tNLuA+0Zzhn/Fo+FDYAHWZHx4R79Zsf
-# RFYe9UiXpXBDf6DkUo183Y38NYmR/XfDYf7YZ+oR9t3flbDwK+hgGMs0gNNp1w9Z
-# 2CyOyI5or/sSwomAuNQ0hWC9xoU4stD8aWsD7RkcmgVRs6vlIk3zPKQ+ylcheWkM
-# lj+CoVRlFE55pv0ZWCaFt04lwP/rdGHE9qEVQZtyRE42ox7oNgC/r+Y4bSlZ3dw9
-# K2x1xLtu6PkPKeLBFjzKigwfqm3Hm+k/+lnME8F5kPZTgiy2HLEHklpryqs6QHnP
-# XrRNeIzkAMyylnRN8P0wmirS0WkU+ywpEWFZ4QNg+9xS43tTuW9x0eXh7NDc1P/s
-# V+zWxHXKH8tFt1ncHdVzqrZaYPyYMLSn2TOXajveJW1L3joiQSPsWRGxkbDDW15j
-# ERFE4LvjnGu2O9zD1nLJSMdlYZEikl4w2w+q4IN/R+TIe0H4ngCI1moJCTbevGH4
-# punIxM1Uoi0nmX3ZK+XbRT01uowE5ViXWHng0RgsmrX/EdYUo80r3TfMlkD0/YMw
-# gga0MIIEnKADAgECAhANx6xXBf8hmS5AQyIMOkmGMA0GCSqGSIb3DQEBCwUAMGIx
-# CzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3
-# dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBH
-# NDAeFw0yNTA1MDcwMDAwMDBaFw0zODAxMTQyMzU5NTlaMGkxCzAJBgNVBAYTAlVT
-# MRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1
-# c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwggIi
-# MA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQC0eDHTCphBcr48RsAcrHXbo0Zo
-# dLRRF51NrY0NlLWZloMsVO1DahGPNRcybEKq+RuwOnPhof6pvF4uGjwjqNjfEvUi
-# 6wuim5bap+0lgloM2zX4kftn5B1IpYzTqpyFQ/4Bt0mAxAHeHYNnQxqXmRinvuNg
-# xVBdJkf77S2uPoCj7GH8BLuxBG5AvftBdsOECS1UkxBvMgEdgkFiDNYiOTx4OtiF
-# cMSkqTtF2hfQz3zQSku2Ws3IfDReb6e3mmdglTcaarps0wjUjsZvkgFkriK9tUKJ
-# m/s80FiocSk1VYLZlDwFt+cVFBURJg6zMUjZa/zbCclF83bRVFLeGkuAhHiGPMvS
-# GmhgaTzVyhYn4p0+8y9oHRaQT/aofEnS5xLrfxnGpTXiUOeSLsJygoLPp66bkDX1
-# ZlAeSpQl92QOMeRxykvq6gbylsXQskBBBnGy3tW/AMOMCZIVNSaz7BX8VtYGqLt9
-# MmeOreGPRdtBx3yGOP+rx3rKWDEJlIqLXvJWnY0v5ydPpOjL6s36czwzsucuoKs7
-# Yk/ehb//Wx+5kMqIMRvUBDx6z1ev+7psNOdgJMoiwOrUG2ZdSoQbU2rMkpLiQ6bG
-# RinZbI4OLu9BMIFm1UUl9VnePs6BaaeEWvjJSjNm2qA+sdFUeEY0qVjPKOWug/G6
-# X5uAiynM7Bu2ayBjUwIDAQABo4IBXTCCAVkwEgYDVR0TAQH/BAgwBgEB/wIBADAd
-# BgNVHQ4EFgQU729TSunkBnx6yuKQVvYv1Ensy04wHwYDVR0jBBgwFoAU7NfjgtJx
-# XWRM3y5nP+e6mK4cD08wDgYDVR0PAQH/BAQDAgGGMBMGA1UdJQQMMAoGCCsGAQUF
-# BwMIMHcGCCsGAQUFBwEBBGswaTAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGln
-# aWNlcnQuY29tMEEGCCsGAQUFBzAChjVodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5j
-# b20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNydDBDBgNVHR8EPDA6MDigNqA0hjJo
-# dHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNy
-# bDAgBgNVHSAEGTAXMAgGBmeBDAEEAjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQEL
-# BQADggIBABfO+xaAHP4HPRF2cTC9vgvItTSmf83Qh8WIGjB/T8ObXAZz8OjuhUxj
-# aaFdleMM0lBryPTQM2qEJPe36zwbSI/mS83afsl3YTj+IQhQE7jU/kXjjytJgnn0
-# hvrV6hqWGd3rLAUt6vJy9lMDPjTLxLgXf9r5nWMQwr8Myb9rEVKChHyfpzee5kH0
-# F8HABBgr0UdqirZ7bowe9Vj2AIMD8liyrukZ2iA/wdG2th9y1IsA0QF8dTXqvcnT
-# mpfeQh35k5zOCPmSNq1UH410ANVko43+Cdmu4y81hjajV/gxdEkMx1NKU4uHQcKf
-# ZxAvBAKqMVuqte69M9J6A47OvgRaPs+2ykgcGV00TYr2Lr3ty9qIijanrUR3anzE
-# wlvzZiiyfTPjLbnFRsjsYg39OlV8cipDoq7+qNNjqFzeGxcytL5TTLL4ZaoBdqbh
-# OhZ3ZRDUphPvSRmMThi0vw9vODRzW6AxnJll38F0cuJG7uEBYTptMSbhdhGQDpOX
-# gpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAlZ66RzIg9sC+NJpud/v4+7RWsWCiKi9EO
-# LLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1MIDpMPx0LckTetiSuEtQvLsNz3Qbp7wG
-# WqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZsq8WhbaM2tszWkPZPubdcMIIFjTCCBHWg
-# AwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0BAQwFADBlMQswCQYDVQQG
-# EwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNl
-# cnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVkIElEIFJvb3QgQ0EwHhcN
-# MjIwODAxMDAwMDAwWhcNMzExMTA5MjM1OTU5WjBiMQswCQYDVQQGEwJVUzEVMBMG
-# A1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3d3cuZGlnaWNlcnQuY29tMSEw
-# HwYDVQQDExhEaWdpQ2VydCBUcnVzdGVkIFJvb3QgRzQwggIiMA0GCSqGSIb3DQEB
-# AQUAA4ICDwAwggIKAoICAQC/5pBzaN675F1KPDAiMGkz7MKnJS7JIT3yithZwuEp
-# pz1Yq3aaza57G4QNxDAf8xukOBbrVsaXbR2rsnnyyhHS5F/WBTxSD1Ifxp4VpX6+
-# n6lXFllVcq9ok3DCsrp1mWpzMpTREEQQLt+C8weE5nQ7bXHiLQwb7iDVySAdYykt
-# zuxeTsiT+CFhmzTrBcZe7FsavOvJz82sNEBfsXpm7nfISKhmV1efVFiODCu3T6cw
-# 2Vbuyntd463JT17lNecxy9qTXtyOj4DatpGYQJB5w3jHtrHEtWoYOAMQjdjUN6Qu
-# BX2I9YI+EJFwq1WCQTLX2wRzKm6RAXwhTNS8rhsDdV14Ztk6MUSaM0C/CNdaSaTC
-# 5qmgZ92kJ7yhTzm1EVgX9yRcRo9k98FpiHaYdj1ZXUJ2h4mXaXpI8OCiEhtmmnTK
-# 3kse5w5jrubU75KSOp493ADkRSWJtppEGSt+wJS00mFt6zPZxd9LBADMfRyVw4/3
-# IbKyEbe7f/LVjHAsQWCqsWMYRJUadmJ+9oCw++hkpjPRiQfhvbfmQ6QYuKZ3AeEP
-# lAwhHbJUKSWJbOUOUlFHdL4mrLZBdd56rF+NP8m800ERElvlEFDrMcXKchYiCd98
-# THU/Y+whX8QgUWtvsauGi0/C1kVfnSD8oR7FwI+isX4KJpn15GkvmB0t9dmpsh3l
-# GwIDAQABo4IBOjCCATYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQU7NfjgtJx
-# XWRM3y5nP+e6mK4cD08wHwYDVR0jBBgwFoAUReuir/SSy4IxLVGLp6chnfNtyA8w
-# DgYDVR0PAQH/BAQDAgGGMHkGCCsGAQUFBwEBBG0wazAkBggrBgEFBQcwAYYYaHR0
-# cDovL29jc3AuZGlnaWNlcnQuY29tMEMGCCsGAQUFBzAChjdodHRwOi8vY2FjZXJ0
-# cy5kaWdpY2VydC5jb20vRGlnaUNlcnRBc3N1cmVkSURSb290Q0EuY3J0MEUGA1Ud
-# HwQ+MDwwOqA4oDaGNGh0dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydEFz
-# c3VyZWRJRFJvb3RDQS5jcmwwEQYDVR0gBAowCDAGBgRVHSAAMA0GCSqGSIb3DQEB
-# DAUAA4IBAQBwoL9DXFXnOF+go3QbPbYW1/e/Vwe9mqyhhyzshV6pGrsi+IcaaVQi
-# 7aSId229GhT0E0p6Ly23OO/0/4C5+KH38nLeJLxSA8hO0Cre+i1Wz/n096wwepqL
-# sl7Uz9FDRJtDIeuWcqFItJnLnU+nBgMTdydE1Od/6Fmo8L8vC6bp8jQ87PcDx4eo
-# 0kxAGTVGamlUsLihVo7spNU96LHc/RzY9HdaXFSMb++hUD38dglohJ9vytsgjTVg
-# HAIDyyCwrFigDkBjxZgiwbJZ9VVrzyerbHbObyMt9H5xaiNrIv8SuFQtJ37YOtnw
-# toeW/VvRXKwYw02fc7cBqZ9Xql4o4rmUMYIDfDCCA3gCAQEwfTBpMQswCQYDVQQG
-# EwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0
-# IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0Ex
-# AhAIT9wzT35FTtvDD4/5khg1MA0GCWCGSAFlAwQCAQUAoIHRMBoGCSqGSIb3DQEJ
-# AzENBgsqhkiG9w0BCRABBDAcBgkqhkiG9w0BCQUxDxcNMjYwOTE0MDgwNjMwWjAr
-# BgsqhkiG9w0BCRACDDEcMBowGDAWBBRR2avaA0lz2E9CZqykgkjms2nEOTAvBgkq
-# hkiG9w0BCQQxIgQgLtUs+lKXjeSzincfdm3UxmghLOVTZ6sp/KD0hkLiPhYwNwYL
-# KoZIhvcNAQkQAi8xKDAmMCQwIgQgLaCdp/QTH5/nLbbF5unJZWdVrwQ/HqdCzA0h
-# IOFB6/wwDQYJKoZIhvcNAQEBBQAEggIAfmhuaN0O/UQSH7hTTAGkB6yGpiIcJ4XT
-# xcm8sfaG1OvMETwX7trI5rgwfufgK1csf86vvonjqWxE/MIEjWBwWWUn0lJz40cD
-# KioReYysnR4rZiLxNexlOWMh5HqGXCPRwsCG2k2YyAwBAYemh5yWZk2tnomvlVjO
-# nBG1hW7iznuOJ6xTe8KBbtPkta/ojPEfvO6l5zFg/KMSWnEB1tB8r8CzcPkD4Fn7
-# DSVHHMVh85oiEO9hgf8DBNIX7ks2r3GRirQFiWth77NOWvNgV5b5YAY5oR7kTabE
-# l9myv1qhDBA488p/AJ5Y7Ehnr9BuHFGb70OUDEzGA14hQKNbhe50LOE546IVl+Mv
-# sr6vTGKjIpSQCTqLd37+iJp8n6qv05JAGAkVxwvHUUaeEs1ndJdub4dnxnGwLFys
-# Tylupx2AZhwNNPqKSVbF0ljeAqaM6mH+Seeg2RqhHg58i2e+o1GNx4zpY2BaqMoN
-# BgCldGhrfai4kDKZpBjHCAcYeHwAZiVbik+q1FLfZfceWv+/k1+typ9eJH/6W0Gj
-# 24PaaVH5O3KFpJ+6MhoyH+X1Kd9FdYO2yzF+/IwQbb7WmyrvrQARIVwOU76206gb
-# RtaxlThTEeHBu3TEs12agNO5G2DD2UKazke7dv+pDQAH0vHjP/5FMhyLyZTru+rU
-# AzoHi52ZkOM=
+# NUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9bAcBMA0GCSqG
+# SIb3DQEBCwUAA4ICAQCNxTphHp1SCt+ZrAmAfn0oQLFr0mLywSLaDXQIENoyKqxr
+# FbJblzCVP/pkXmwXOdrOpWygLzlT12os5ipDCy35RBCg2UMeApEtrfGhz45F4Wt4
+# WGdNdIbRWt3YTYJmpR+b7lr4d7Uwn+H600u4D7RnOGf8Wj4UNgAdZkfHhHv1mx9E
+# Vh71SJelcEN/oORSjXzdjfw1iZH9d8Nh/thn6hH23d+VsPAr6GAYyzSA02nXD1nY
+# LI7Ijmiv+xLCiYC41DSFYL3GhTiy0PxpawPtGRyaBVGzq+UiTfM8pD7KVyF5aQyW
+# P4KhVGUUTnmm/RlYJoW3TiXA/+t0YcT2oRVBm3JETjajHug2AL+v5jhtKVnd3D0r
+# bHXEu27o+Q8p4sEWPMqKDB+qbceb6T/6WcwTwXmQ9lOCLLYcsQeSWmvKqzpAec9e
+# tE14jOQAzLKWdE3w/TCaKtLRaRT7LCkRYVnhA2D73FLje1O5b3HR5eHs0NzU/+xX
+# 7NbEdcofy0W3Wdwd1XOqtlpg/JgwtKfZM5dqO94lbUveOiJBI+xZEbGRsMNbXmMR
+# EUTgu+Oca7Y73MPWcslIx2VhkSKSXjDbD6rgg39H5Mh7QfieAIjWagkJNt68Yfim
+# 6cjEzVSiLSeZfdkr5dtFPTW6jATlWJdYeeDRGCyatf8R1hSjzSvdN8yWQPT9gzCC
+# BrQwggScoAMCAQICEA3HrFcF/yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjEL
+# MAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3
+# LmRpZ2ljZXJ0LmNvbTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0
+# MB4XDTI1MDUwNzAwMDAwMFoXDTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMx
+# FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVz
+# dGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIw
+# DQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0
+# tFEXnU2tjQ2UtZmWgyxU7UNqEY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLr
+# C6Kbltqn7SWCWgzbNfiR+2fkHUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DF
+# UF0mR/vtLa4+gKPsYfwEu7EEbkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVw
+# xKSpO0XaF9DPfNBKS7Zazch8NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb
+# +zzQWKhxKTVVgtmUPAW35xUUFREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9Ia
+# aGBpPNXKFifinT7zL2gdFpBP9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVm
+# UB5KlCX3ZA4x5HHKS+rqBvKWxdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30y
+# Z46t4Y9F20HHfIY4/6vHespYMQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqzti
+# T96Fv/9bH7mQyogxG9QEPHrPV6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZG
+# Kdlsjg4u70EwgWbVRSX1Wd4+zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpf
+# m4CLKczsG7ZrIGNTAgMBAAGjggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0G
+# A1UdDgQWBBTvb1NK6eQGfHrK4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFd
+# ZEzfLmc/57qYrhwPTzAOBgNVHQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUH
+# AwgwdwYIKwYBBQUHAQEEazBpMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdp
+# Y2VydC5jb20wQQYIKwYBBQUHMAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNv
+# bS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0
+# dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3Js
+# MCAGA1UdIAQZMBcwCAYGZ4EMAQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsF
+# AAOCAgEAF877FoAc/gc9EXZxML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNp
+# oV2V4wzSUGvI9NAzaoQk97frPBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG
+# +tXqGpYZ3essBS3q8nL2UwM+NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQX
+# wcAEGCvRR2qKtntujB71WPYAgwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOa
+# l95CHfmTnM4I+ZI2rVQfjXQA1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9n
+# EC8EAqoxW6q17r0z0noDjs6+BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTC
+# W/NmKLJ9M+MtucVGyOxiDf06VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6
+# FndlENSmE+9JGYxOGLS/D284NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eC
+# khSxZON3rGlHqhpB/8MluDezooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4s
+# sd8xHZnIn/7GELH3IdvG2XlM9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZa
+# psiI5YKdvlarEvf8EA+8hcpSM9LHJmyrxaFtoza2zNaQ9k+5t1wwggWNMIIEdaAD
+# AgECAhAOmxiO+dAt5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYT
+# AlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2Vy
+# dC5jb20xJDAiBgNVBAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0y
+# MjA4MDEwMDAwMDBaFw0zMTExMDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUwEwYD
+# VQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAf
+# BgNVBAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcNAQEB
+# BQADggIPADCCAgoCggIBAL/mkHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC4Smn
+# PVirdprNrnsbhA3EMB/zG6Q4FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWlfr6f
+# qVcWWVVyr2iTcMKyunWZanMylNEQRBAu34LzB4TmdDttceItDBvuINXJIB1jKS3O
+# 7F5OyJP4IWGbNOsFxl7sWxq868nPzaw0QF+xembud8hIqGZXV59UWI4MK7dPpzDZ
+# Vu7Ke13jrclPXuU15zHL2pNe3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3pC4F
+# fYj1gj4QkXCrVYJBMtfbBHMqbpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJpMLm
+# qaBn3aQnvKFPObURWBf3JFxGj2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aadMre
+# Sx7nDmOu5tTvkpI6nj3cAORFJYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXDj/ch
+# srIRt7t/8tWMcCxBYKqxYxhElRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB4Q+U
+# DCEdslQpJYls5Q5SUUd0viastkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ33xM
+# dT9j7CFfxCBRa2+xq4aLT8LWRV+dIPyhHsXAj6KxfgommfXkaS+YHS312amyHeUb
+# AgMBAAGjggE6MIIBNjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC0nFd
+# ZEzfLmc/57qYrhwPTzAfBgNVHSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzAO
+# BgNVHQ8BAf8EBAMCAYYweQYIKwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhhodHRw
+# Oi8vb2NzcC5kaWdpY2VydC5jb20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNlcnRz
+# LmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYDVR0f
+# BD4wPDA6oDigNoY0aHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNz
+# dXJlZElEUm9vdENBLmNybDARBgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcNAQEM
+# BQADggEBAHCgv0NcVec4X6CjdBs9thbX979XB72arKGHLOyFXqkauyL4hxppVCLt
+# pIh3bb0aFPQTSnovLbc47/T/gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6mouy
+# XtTP0UNEm0Mh65ZyoUi0mcudT6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPHh6jS
+# TEAZNUZqaVSwuKFWjuyk1T3osdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCNNWAc
+# AgPLILCsWKAOQGPFmCLBsln1VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg62fC2
+# h5b9W9FcrBjDTZ9ztwGpn1eqXijiuZQxggN8MIIDeAIBATB9MGkxCzAJBgNVBAYT
+# AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
+# VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
+# EAhP3DNPfkVO28MPj/mSGDUwDQYJYIZIAWUDBAIBBQCggdEwGgYJKoZIhvcNAQkD
+# MQ0GCyqGSIb3DQEJEAEEMBwGCSqGSIb3DQEJBTEPFw0yNjA5MjYwNTA4MjBaMCsG
+# CyqGSIb3DQEJEAIMMRwwGjAYMBYEFFHZq9oDSXPYT0JmrKSCSOazacQ5MC8GCSqG
+# SIb3DQEJBDEiBCD2KkunWXJyOtHH+lhqAKzLs7eF9GcFYfcsV49rRWHzGTA3Bgsq
+# hkiG9w0BCRACLzEoMCYwJDAiBCAtoJ2n9BMfn+cttsXm6cllZ1WvBD8ep0LMDSEg
+# 4UHr/DANBgkqhkiG9w0BAQEFAASCAgCbT44QWz8yKjvsa5E4dHrUMddzhqhDaqmb
+# VuBp0MQJT4cfxPUpKo5xq7Vs12BMRz5q4qUquE6VPqIouFI+TR7jFUSUWQoEctrk
+# Fc/hGVg7Rd8YkRrRb3opy3qvCCHLbHq88oujFKbEtrKMCEIg4bK2hHXbWPJ+P55d
+# CbdAgAbjvjwop0wkN3nX91Zf+yX8sEvQ2JyMLbYXo40L5iaYtYUPqU3J8EKz45fl
+# bhoOXp+php5aFHap+W81d/URJKPOWOcE4/alIdf2nn7J30v1FtsIwEvRZKmWba2s
+# iGVyikIRsF+BzVMaLEAdmsmTN8pyx2RNQK4GfB8SXOoC2fQkD5Gno4DwCYmt+iyu
+# nDeaq26e5g78z0Lh1yGMgtFDJK3fB7xI9TIq9fuRCe88LnGRi1cCBku/GfiRH0Br
+# ebTTQV54O54xo0aWitdOssKowtICnFe8wnGFcbTnqvbVguzXWCYv8cbJw0o0Dqfg
+# u4HD5lI03lGdh3NRSv/7yo1SJjXiOhPN7TFuqZlU/snPvi598wVVPcxyI8NZ6x8i
+# Z7lJb3t1orcjh+oMLpQeaiiTenUK9nXAaMRbTZUlQYHaveCeYUUR1T2xozxRQW4H
+# jc7YIhx/5GSwhMV81EmobYagD4NKhFBesIg5V9dR5+gtkrPgsfrXZ8ECD6k6JYDS
+# d5xhy+RmtA==
 # SIG # End signature block

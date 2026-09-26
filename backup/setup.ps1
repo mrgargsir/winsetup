@@ -236,6 +236,26 @@ function Test-CatalogTargetPresent {
                     if ((Get-Item $path).Property | Where-Object { $_ -match [regex]::Escape($kw) }) { return $true }
                 }
             }
+            # 👉 A Run entry can be gone but Task Manager still shows the item "Enabled" if the
+            # 👉 StartupApproved byte still says enabled, OR if a Startup-folder shortcut still exists.
+            $approvedPaths = @("HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder")
+            foreach ($apath in $approvedPaths) {
+                if (Test-Path $apath) {
+                    foreach ($name in (Get-Item $apath).Property) {
+                        if ($name -match [regex]::Escape($kw)) {
+                            $val = (Get-ItemProperty -Path $apath -Name $name -ErrorAction SilentlyContinue).$name
+                            # 👉 first byte 0x02 (or 0x06) = still enabled; 0x03/0x01 = disabled
+                            if ($val -and ($val[0] -eq 0x02 -or $val[0] -eq 0x06)) { return $true }
+                        }
+                    }
+                }
+            }
+            $startupFolders = @("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup")
+            foreach ($folder in $startupFolders) {
+                if (Test-Path $folder) {
+                    if (Get-ChildItem $folder -File -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -match [regex]::Escape($kw) }) { return $true }
+                }
+            }
         }
     }
     return $false
@@ -296,6 +316,26 @@ function Remove-CatalogTargetPrimary {
                             $disabledValue = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
                             Set-ItemProperty -Path $path -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
                         }
+                    }
+                }
+            }
+            # 👉 NEW: Startup-folder shortcuts (Discord, Spotify, Steam, Dropbox, Slack, etc. commonly
+            # 👉 use these instead of the Run key). Task Manager reads their status from
+            # 👉 StartupApproved\StartupFolder, keyed by the shortcut's filename - not app name -
+            # 👉 so we match by filename here, disable that key, AND remove the shortcut itself
+            # 👉 (belt and braces: if the source .lnk is gone, Task Manager stops listing it at all).
+            $startupFolders = @("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup")
+            $startupFolderApproved = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+            foreach ($folder in $startupFolders) {
+                if (Test-Path $folder) {
+                    Get-ChildItem $folder -File -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -match [regex]::Escape($kw) } | ForEach-Object {
+                        $fileName = $_.Name
+                        if (Test-Path $startupFolderApproved) {
+                            $disabledValue = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+                            Set-ItemProperty -Path $startupFolderApproved -Name $fileName -Value $disabledValue -ErrorAction SilentlyContinue
+                        }
+                        Write-Host "  Removing startup folder shortcut: $fileName" -ForegroundColor DarkGray
+                        Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
                     }
                 }
             }
@@ -381,48 +421,67 @@ function New-DataPartitionFromFreeSpace {
     Write-Host "`nChecking disk layout for auto-partition..." -ForegroundColor Cyan
     $fixedVolumes = Get-Volume | Where-Object { $_.DriveLetter -and $_.DriveType -eq 'Fixed' }
 
-    if ($fixedVolumes.Count -eq 1 -and $fixedVolumes.DriveLetter -eq 'C') {
-        $cVolume = Get-Volume -DriveLetter C
-        $freeBytes = $cVolume.SizeRemaining
-        $freeGB = [math]::Round($freeBytes / 1GB, 2)
+    # 👉 Diagnostic: always show what was actually found, so a skip can be understood instead of
+    # 👉 just printing a generic yellow warning with no way to tell why.
+    Write-Host "  Fixed lettered volumes found:" -ForegroundColor DarkGray
+    foreach ($v in $fixedVolumes) {
+        $sizeGB = [math]::Round($v.Size / 1GB, 1)
+        Write-Host "    $($v.DriveLetter): '$($v.FileSystemLabel)' - $sizeGB GB - Disk $((Get-Partition -DriveLetter $v.DriveLetter -ErrorAction SilentlyContinue).DiskNumber)" -ForegroundColor DarkGray
+    }
 
-        # Tiered shrink percentage based on available free space
-        $shrinkPct = 0
-        $tierLabel = ""
-        if ($freeGB -ge 30 -and $freeGB -lt 50) {
-            $shrinkPct = 0.20; $tierLabel = "30-50 GB tier"
-        }
-        elseif ($freeGB -ge 50 -and $freeGB -lt 70) {
-            $shrinkPct = 0.30; $tierLabel = "50-70 GB tier"
-        }
-        elseif ($freeGB -ge 70 -and $freeGB -lt 100) {
-            $shrinkPct = 0.40; $tierLabel = "70-100 GB tier"
-        }
-        elseif ($freeGB -ge 100) {
-            $shrinkPct = 0.50; $tierLabel = "100+ GB tier"
-        }
+    $cVolume = Get-Volume -DriveLetter C -ErrorAction SilentlyContinue
+    if (-not $cVolume) {
+        Write-Host "  Could not find C: volume - skipping." -ForegroundColor Yellow
+        return
+    }
 
-        if ($shrinkPct -gt 0) {
-            $shrinkBytes = [int64]($freeBytes * $shrinkPct)
-            $shrinkGB = [math]::Round($shrinkBytes / 1GB, 2)
-            Write-Host "Free space: $freeGB GB ($tierLabel). Shrinking C: by $($shrinkPct * 100)% = $shrinkGB GB to create D:..." -ForegroundColor DarkGray
+    $dTaken = $fixedVolumes | Where-Object { $_.DriveLetter -eq 'D' }
+    if ($dTaken) {
+        Write-Host "  D: is already in use - skipping auto-partition." -ForegroundColor Yellow
+        return
+    }
 
-            $partition = Get-Partition -DriveLetter C
-            $newCSize = $partition.Size - $shrinkBytes
-            Resize-Partition -DriveLetter C -Size $newCSize -ErrorAction Stop
+    # 👉 CHANGED: previously required C: to be the ONLY lettered fixed volume on the whole machine.
+    # 👉 That skipped every machine with an OEM recovery partition, a "System Reserved" volume, or a
+    # 👉 second physical disk that happens to carry a drive letter - even though none of those affect
+    # 👉 whether we can safely shrink C: and hand the freed space to a new D:. The only things that
+    # 👉 actually matter are: C: exists, and D: isn't already taken (checked above).
+    $freeBytes = $cVolume.SizeRemaining
+    $freeGB = [math]::Round($freeBytes / 1GB, 2)
 
-            $disk = $partition.DiskNumber
-            $newPartition = New-Partition -DiskNumber $disk -UseMaximumSize -DriveLetter D
-            Format-Volume -Partition $newPartition -FileSystem NTFS -NewFileSystemLabel "Data" -Confirm:$false
+    # Tiered shrink percentage based on available free space
+    $shrinkPct = 0
+    $tierLabel = ""
+    if ($freeGB -ge 30 -and $freeGB -lt 50) {
+        $shrinkPct = 0.20; $tierLabel = "30-50 GB tier"
+    }
+    elseif ($freeGB -ge 50 -and $freeGB -lt 70) {
+        $shrinkPct = 0.30; $tierLabel = "50-70 GB tier"
+    }
+    elseif ($freeGB -ge 70 -and $freeGB -lt 100) {
+        $shrinkPct = 0.40; $tierLabel = "70-100 GB tier"
+    }
+    elseif ($freeGB -ge 100) {
+        $shrinkPct = 0.50; $tierLabel = "100+ GB tier"
+    }
 
-            Write-Host "D: drive created successfully ($shrinkGB GB)." -ForegroundColor Green
-        }
-        else {
-            Write-Host "Only $freeGB GB free (need at least 30 GB) - skipping partition." -ForegroundColor Yellow
-        }
+    if ($shrinkPct -gt 0) {
+        $shrinkBytes = [int64]($freeBytes * $shrinkPct)
+        $shrinkGB = [math]::Round($shrinkBytes / 1GB, 2)
+        Write-Host "Free space: $freeGB GB ($tierLabel). Shrinking C: by $($shrinkPct * 100)% = $shrinkGB GB to create D:..." -ForegroundColor DarkGray
+
+        $partition = Get-Partition -DriveLetter C
+        $newCSize = $partition.Size - $shrinkBytes
+        Resize-Partition -DriveLetter C -Size $newCSize -ErrorAction Stop
+
+        $disk = $partition.DiskNumber
+        $newPartition = New-Partition -DiskNumber $disk -UseMaximumSize -DriveLetter D
+        Format-Volume -Partition $newPartition -FileSystem NTFS -NewFileSystemLabel "Data" -Confirm:$false
+
+        Write-Host "D: drive created successfully ($shrinkGB GB)." -ForegroundColor Green
     }
     else {
-        Write-Host "Multiple partitions already exist or C: not sole volume - skipping." -ForegroundColor Yellow
+        Write-Host "Only $freeGB GB free (need at least 30 GB) - skipping partition." -ForegroundColor Yellow
     }
 }
 
@@ -706,6 +765,25 @@ function Set-BrowserTweaks {
     Set-ItemProperty -Path $edgePath -Name NewTabPagePrerenderEnabled -Value 0 -Type DWord -Force
     Set-ItemProperty -Path $edgePath -Name EdgeAutoLaunchAtWindowsStartupEnabled -Value 0 -Type DWord -Force
 
+    # 👉 NEW - Edge AI/Copilot extras (confirmed policy names)
+    Set-RegValueSafe $edgePath "Microsoft365CopilotChatIconEnabled" 0   # hide the M365 Copilot chat icon
+    Set-RegValueSafe $edgePath "EdgeHistoryAISearchEnabled" 0           # AI-powered history search
+    Set-RegValueSafe $edgePath "ComposeInlineEnabled" 0                 # inline Compose feature
+
+    # 👉 NEW - Payments, personalization, rewards, spotlight, cloud tabs, VPN, visual search, themes
+    # 👉 (mix of confirmed and best-effort policy names - inert if a given build doesn't recognize one)
+    Set-RegValueSafe $edgePath "PaymentMethodQueryEnabled" 0             # checking for saved payment methods on sites
+    Set-RegValueSafe $edgePath "AutofillCreditCardEnabled" 0             # storing/autocompleting credit card data
+    Set-RegValueSafe $edgePath "PersonalizationReportingEnabled" 0       # personalized ads/search/news
+    Set-RegValueSafe $edgePath "ShowMicrosoftRewards" 0                  # Microsoft Rewards
+    Set-RegValueSafe $edgePath "EdgeSpotlightExperiencesEnabled" 0       # spotlight experiences/recommendations
+    Set-RegValueSafe $edgePath "EdgeWorkspacesEnabled" 0                 # cloud-based tab services
+    Set-RegValueSafe $edgePath "VisualSearchEnabled" 0                   # visual search (lens icon)
+    Set-RegValueSafe $edgePath "DynamicThemesEnabled" 0                  # AI-generated themes
+    Set-RegValueSafe $edgePath "BuiltInAIModelsEnabled" 0                # built-in AI APIs for websites
+    Set-RegValueSafe $edgePath "EdgeSecureNetworkEnabled" 0              # Edge Secure Network (built-in VPN)
+    Set-RegValueSafe $edgePath "HubsSidebarAIEnabled" 0                  # Bing Chat / Copilot on new tab page
+
     Write-Host "Browser tweaks applied." -ForegroundColor Green
 }
 
@@ -749,6 +827,18 @@ function Disable-StartupItems {
             foreach ($name in $entries.Property) {
                 if (Test-Whitelisted $name -or Test-TargetMatch $name) { continue }
                 if (-not $remaining.ContainsKey($name)) { $remaining[$name] = $path }
+            }
+        }
+    }
+    # 👉 NEW: also surface leftover Startup-folder shortcuts (these were previously invisible to
+    # 👉 this picker, which is why some items kept showing "Enabled" in Task Manager afterwards)
+    $startupFolders = @("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup", "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup")
+    foreach ($folder in $startupFolders) {
+        if (Test-Path $folder) {
+            foreach ($file in (Get-ChildItem $folder -File -ErrorAction SilentlyContinue)) {
+                $name = $file.Name
+                if (Test-Whitelisted $name -or Test-TargetMatch $name) { continue }
+                if (-not $remaining.ContainsKey($name)) { $remaining[$name] = "STARTUPFOLDER::$($file.FullName)" }
             }
         }
     }
@@ -808,7 +898,17 @@ function Disable-StartupItems {
         $checkedNames = $checkList.CheckedItems | ForEach-Object { $_.ToString() }
         foreach ($name in $checkedNames) {
             $path = $remaining[$name]
-            if ($path -match "StartupApproved") {
+            if ($path -match "^STARTUPFOLDER::") {
+                $fullFilePath = $path -replace "^STARTUPFOLDER::", ""
+                $approvedFolderPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+                if (Test-Path $approvedFolderPath) {
+                    $disabledValue = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+                    Set-ItemProperty -Path $approvedFolderPath -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
+                }
+                Write-Host "  Removing startup folder shortcut: $name" -ForegroundColor DarkGray
+                Remove-Item -Path $fullFilePath -Force -ErrorAction SilentlyContinue
+            }
+            elseif ($path -match "StartupApproved") {
                 Write-Host "  Disabling modern startup app: $name" -ForegroundColor DarkGray
                 $disabledValue = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
                 Set-ItemProperty -Path $path -Name $name -Value $disabledValue -ErrorAction SilentlyContinue
@@ -864,6 +964,27 @@ function Set-TaskbarTweaks {
     # 👉 These two apply the same way on both Windows 10 and 11
     Set-RegValueSafe $searchPath "SearchboxTaskbarMode" 1
     Set-RegValueSafe $advPath "ShowTaskViewButton" 0
+
+    # 👉 NEW - "Meet now" chat icon (confirmed GPO key, applies on both 10 and 11 where the icon still exists)
+    $explorerPolicyMachine = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+    if (-not (Test-Path $explorerPolicyMachine)) { New-Item -Path $explorerPolicyMachine -Force | Out-Null }
+    Set-RegValueSafe $explorerPolicyMachine "HideSCAMeetNow" 1
+
+    # 👉 NEW - People icon in the taskbar (Windows 10-era feature)
+    $peoplePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\People"
+    if (-not (Test-Path $peoplePath)) { New-Item -Path $peoplePath -Force | Out-Null }
+    Set-RegValueSafe $peoplePath "PeopleBand" 0
+
+    # 👉 NEW - News and interests / Widgets feed content (confirmed GPO key, in addition to the view-mode
+    # 👉 toggle already set above for older builds)
+    $feedsPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Feeds"
+    if (-not (Test-Path $feedsPolicyPath)) { New-Item -Path $feedsPolicyPath -Force | Out-Null }
+    Set-RegValueSafe $feedsPolicyPath "EnableFeeds" 0
+
+    # 👉 NEW - Search Highlights (the colorful icons Windows adds to the search box for holidays/events)
+    $searchPolicyMachine = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
+    if (-not (Test-Path $searchPolicyMachine)) { New-Item -Path $searchPolicyMachine -Force | Out-Null }
+    Set-RegValueSafe $searchPolicyMachine "EnableDynamicContentInWSB" 0
 
     Write-Host "[+] Taskbar tweaks applied." -ForegroundColor Green
 }
@@ -936,9 +1057,9 @@ function Disable-UnnecessaryScheduledTasks {
         return
     }
 
-    $tasksToDisable = @("Microsoft\Windows\Customer Experience Improvement Program\Consolidator", "Microsoft\Windows\Customer Experience Improvement Program\UsbCeip", "Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector", "Microsoft\Windows\Feedback\Siuf\DmClient", "Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload", "Microsoft\Windows\Windows Error Reporting\QueueReporting", "Microsoft\Windows\Maps\MapsToastTask", "Microsoft\Windows\Maps\MapsUpdateTask", "Microsoft\Windows\PI\Sqm-Tasks", "Microsoft\Windows\Shell\FamilySafetyMonitor", "Microsoft\Windows\Shell\FamilySafetyRefresh", "Microsoft\Windows\Retail Demo\CleanupOffline")
-
-    #$advancetasksToDisable = @("Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser","Microsoft\Windows\Application Experience\ProgramDataUpdater","Microsoft\Windows\Autochk\Proxy"
+    $tasksToDisable = @("Microsoft\Windows\Customer Experience Improvement Program\Consolidator", "Microsoft\Windows\Customer Experience Improvement Program\UsbCeip", "Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector", "Microsoft\Windows\Feedback\Siuf\DmClient", "Microsoft\Windows\Feedback\Siuf\DmClientOnScenarioDownload", "Microsoft\Windows\Windows Error Reporting\QueueReporting", "Microsoft\Windows\Maps\MapsToastTask", "Microsoft\Windows\Maps\MapsUpdateTask", "Microsoft\Windows\PI\Sqm-Tasks", "Microsoft\Windows\Shell\FamilySafetyMonitor", "Microsoft\Windows\Shell\FamilySafetyRefresh", "Microsoft\Windows\Retail Demo\CleanupOffline", "Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser", "Microsoft\Windows\Application Experience\ProgramDataUpdater")
+    # 👉 NEW - these two feed the Inventory Collector telemetry pipeline that Disable-TelemetryAndAdvertising
+    # 👉 now also disables at the registry level (AppCompat\DisableInventory) - disabling both belt-and-braces
 
     foreach ($taskPath in $tasksToDisable) {
         $taskName = Split-Path $taskPath -Leaf
@@ -969,14 +1090,181 @@ function Disable-TelemetryAndAdvertising {
     $privacyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy"
     if (-not (Test-Path $privacyPath)) { New-Item -Path $privacyPath -Force | Out-Null }
     Set-ItemProperty -Path $privacyPath -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0 -Type DWord -Force
-    Write-Host "[+] Telemetry and advertising ID disabled." -ForegroundColor Green
+
+    # 👉 NEW - Handwriting data + handwriting error reports (confirmed Microsoft GPO keys)
+    foreach ($hive in @("HKCU:", "HKLM:")) {
+        $inputPath = "$hive\Software\Policies\Microsoft\InputPersonalization"
+        if (-not (Test-Path $inputPath)) { New-Item -Path $inputPath -Force | Out-Null }
+        Set-RegValueSafe $inputPath "RestrictImplicitInkCollection" 1
+        Set-RegValueSafe $inputPath "RestrictImplicitTextCollection" 1
+        $handwritingPath = "$hive\Software\Policies\Microsoft\Windows\HandwritingErrorReports"
+        if (-not (Test-Path $handwritingPath)) { New-Item -Path $handwritingPath -Force | Out-Null }
+        Set-RegValueSafe $handwritingPath "PreventHandwritingErrorReports" 1
+    }
+
+    # 👉 NEW - Online speech recognition / Input Personalization (also feeds Cortana's old speech model download)
+    $inputPolicyMachine = "HKLM:\Software\Policies\Microsoft\InputPersonalization"
+    Set-RegValueSafe $inputPolicyMachine "AllowInputPersonalization" 0
+    $speechPath = "HKLM:\SOFTWARE\Microsoft\Speech_OneCore\Preferences"
+    if (-not (Test-Path $speechPath)) { New-Item -Path $speechPath -Force | Out-Null }
+    Set-RegValueSafe $speechPath "ModelDownloadAllowed" 0
+
+    # 👉 NEW - Windows Error Reporting: the actual GPO "Disabled" switch (Optimize-BackgroundServices only stopped the service)
+    foreach ($hive in @("HKCU:", "HKLM:")) {
+        $werPolicyPath = "$hive\Software\Policies\Microsoft\Windows\Windows Error Reporting"
+        if (-not (Test-Path $werPolicyPath)) { New-Item -Path $werPolicyPath -Force | Out-Null }
+        Set-RegValueSafe $werPolicyPath "Disabled" 1
+    }
+
+    # 👉 NEW - Limit crash dump collection: switch from a full memory dump to a small (minidump) instead of disabling dumps outright
+    $crashControlPath = "HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl"
+    Set-RegValueSafe $crashControlPath "CrashDumpEnabled" 3   # 3 = small memory dump (256 KB) instead of a full/kernel dump
+    Set-RegValueSafe $crashControlPath "LogEvent" 0
+
+    # 👉 NEW - Feedback reminders (Windows "How was this experience?" prompts)
+    $siufPath = "HKCU:\Software\Microsoft\Siuf\Rules"
+    if (-not (Test-Path $siufPath)) { New-Item -Path $siufPath -Force | Out-Null }
+    Set-ItemProperty -Path $siufPath -Name "NumberOfSIUFInPeriod" -Value 0 -Type DWord -Force
+    Set-ItemProperty -Path $siufPath -Name "PeriodInNanoSeconds" -Value 0 -Type DWord -Force
+
+    # 👉 NEW - Microsoft Defender SpyNet / sample submission (does NOT disable Defender itself, only cloud sample sharing)
+    $spynetPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet"
+    if (-not (Test-Path $spynetPath)) { New-Item -Path $spynetPath -Force | Out-Null }
+    Set-RegValueSafe $spynetPath "SpynetReporting" 0
+    Set-RegValueSafe $spynetPath "SubmitSamplesConsent" 2   # 2 = Never Send
+
+    # 👉 NEW - Inventory Collector / Compatibility Appraiser (the app-usage telemetry pipeline behind the
+    # 👉 "Microsoft Compatibility Appraiser" and "ProgramDataUpdater" scheduled tasks)
+    $appCompatPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppCompat"
+    if (-not (Test-Path $appCompatPath)) { New-Item -Path $appCompatPath -Force | Out-Null }
+    Set-RegValueSafe $appCompatPath "AITEnable" 0
+    Set-RegValueSafe $appCompatPath "DisableInventory" 1
+    Set-RegValueSafe $appCompatPath "DisableUAR" 1
+
+    # 👉 NEW - Windows Media Player diagnostics / metadata lookups
+    $wmpPath = "HKCU:\Software\Policies\Microsoft\WindowsMediaPlayer"
+    if (-not (Test-Path $wmpPath)) { New-Item -Path $wmpPath -Force | Out-Null }
+    Set-RegValueSafe $wmpPath "PreventCDDVDMetadataRetrieval" 1
+    Set-RegValueSafe $wmpPath "PreventMusicFileMetadataRetrieval" 1
+    Set-RegValueSafe $wmpPath "PreventRadioPresetsRetrieval" 1
+
+    # 👉 NEW - Steps Recorder (psr.exe) - best-effort: this GPO is less consistently documented across
+    # 👉 builds than the others above, so treat it as opportunistic rather than guaranteed to take effect
+    $psrPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PSR"
+    if (-not (Test-Path $psrPath)) { New-Item -Path $psrPath -Force | Out-Null }
+    Set-RegValueSafe $psrPath "DisableUI" 1
+
+    Write-Host "[+] Telemetry, advertising ID, and related privacy settings disabled." -ForegroundColor Green
+}
+
+# ---------------- SECTION 10b: PER-APP PRIVACY PERMISSIONS ----------------
+function Disable-AppPrivacyPermissions {
+    Write-Host "`n[*] Locking down per-app privacy permissions..." -ForegroundColor Cyan
+
+    $appPrivacyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy"
+    if (-not (Test-Path $appPrivacyPath)) { New-Item -Path $appPrivacyPath -Force | Out-Null }
+
+    # 👉 All of these use Microsoft's standard AppPrivacy convention: 0 = user in control, 1 = force allow, 2 = force deny
+    Set-RegValueSafe $appPrivacyPath "LetAppsAccessLocation" 2
+    Set-RegValueSafe $appPrivacyPath "LetAppsAccessMotion" 2
+    Set-RegValueSafe $appPrivacyPath "LetAppsGetDiagnosticInfo" 2
+    Set-RegValueSafe $appPrivacyPath "LetAppsAccessGenerativeAI" 2
+    Set-RegValueSafe $appPrivacyPath "LetAppsAccessSystemAIModels" 2   # 👉 bonus: covers Windows' on-device AI models too, same family as Generative AI
+
+    # 👉 Presence sensing - best-effort. Microsoft hasn't published a single stable GPO name for this yet
+    # 👉 (it's newer and hardware-gated), so this sets both a plausible AppPrivacy policy name and the
+    # 👉 per-capability consent store deny used by other AI features. Harmless no-op on machines/builds
+    # 👉 where the exact key differs or there's no presence sensor at all.
+    Set-RegValueSafe $appPrivacyPath "LetAppsAccessSystemPresenceSensing" 2
+    $presenceConsentPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\humanPresence"
+    if (-not (Test-Path $presenceConsentPath)) { New-Item -Path $presenceConsentPath -Force | Out-Null }
+    Set-ItemProperty -Path $presenceConsentPath -Name "Value" -Value "Deny" -Type String -Force
+
+    # 👉 System-wide location kill switch (separate from the per-app policy above)
+    $locationPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors"
+    if (-not (Test-Path $locationPath)) { New-Item -Path $locationPath -Force | Out-Null }
+    Set-RegValueSafe $locationPath "DisableLocation" 1
+
+    # 👉 "Allow location override" (lets a signed-in device report a location other than its real one)
+    $locationOverridePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CPSS\Store\UserLocationOverridePrivacySetting"
+    if (-not (Test-Path $locationOverridePath)) { New-Item -Path $locationOverridePath -Force | Out-Null }
+    Set-ItemProperty -Path $locationOverridePath -Name "Value" -Value 0 -Type DWord -Force
+
+    Write-Host "[+] Per-app privacy permissions locked down (location, motion, diagnostics, generative AI, presence sensing)." -ForegroundColor Green
+}
+
+# ---------------- SECTION 10c: OFFICE TELEMETRY ----------------
+function Disable-OfficeTelemetry {
+    Write-Host "`n[*] Disabling Microsoft Office telemetry and feedback..." -ForegroundColor Cyan
+
+    $osppFound = Get-ChildItem -Path @(
+        "$env:ProgramFiles\Microsoft Office", "${env:ProgramFiles(x86)}\Microsoft Office"
+    ) -Filter "ospp.vbs" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if (-not $osppFound) {
+        Write-Host "  Skipped - Microsoft Office not found on this machine." -ForegroundColor Yellow
+        return
+    }
+
+    # 👉 Office version-agnostic policy root - 16.0 covers Office 2016, 2019, 2021, and Microsoft 365
+    $officeRoot = "HKCU:\Software\Policies\Microsoft\office\16.0"
+
+    # 👉 Telemetry submission - confirmed Microsoft-documented path (the unmanaged Office\Common\ClientTelemetry
+    # 👉 key resets itself on every app launch; the Policies path underneath is what actually sticks)
+    $clientTelemetryPath = "$officeRoot\common\clienttelemetry"
+    if (-not (Test-Path $clientTelemetryPath)) { New-Item -Path $clientTelemetryPath -Force | Out-Null }
+    Set-ItemProperty -Path $clientTelemetryPath -Name "DisableTelemetry" -Value 1 -Type DWord -Force
+    Set-ItemProperty -Path $clientTelemetryPath -Name "VerboseLogging" -Value 0 -Type DWord -Force
+    Set-RegValueSafe $clientTelemetryPath "EnableFileObfuscation" 1   # 👉 obfuscate file names when uploading telemetry data - best-effort
+
+    # 👉 Office Telemetry Agent - logging + upload
+    $osmPath = "$officeRoot\osm"
+    if (-not (Test-Path $osmPath)) { New-Item -Path $osmPath -Force | Out-Null }
+    Set-ItemProperty -Path $osmPath -Name "Enablelogging" -Value 0 -Type DWord -Force
+    Set-ItemProperty -Path $osmPath -Name "EnableUpload" -Value 0 -Type DWord -Force
+
+    # 👉 Customer Experience Improvement Program (CEIP)
+    $officeCommonPath = "$officeRoot\common"
+    if (-not (Test-Path $officeCommonPath)) { New-Item -Path $officeCommonPath -Force | Out-Null }
+    Set-ItemProperty -Path $officeCommonPath -Name "qmenable" -Value 0 -Type DWord -Force
+    Set-RegValueSafe $officeCommonPath "DisableLinkedInIntegration" 1     # 👉 hide LinkedIn info in Office
+    Set-RegValueSafe $officeCommonPath "disablesurveynotification" 1     # 👉 Office surveys - best-effort
+
+    # 👉 Proofing Tools feedback ("Microsoft's feedback tracking")
+    $ptWatsonPath = "$officeRoot\common\ptwatson"
+    if (-not (Test-Path $ptWatsonPath)) { New-Item -Path $ptWatsonPath -Force | Out-Null }
+    Set-ItemProperty -Path $ptWatsonPath -Name "PTWOptIn" -Value 0 -Type DWord -Force
+
+    # 👉 First-run experience: skip the intro movie, and suppress the first-run privacy notification banner
+    $firstRunPath = "$officeRoot\common\General"
+    if (-not (Test-Path $firstRunPath)) { New-Item -Path $firstRunPath -Force | Out-Null }
+    Set-RegValueSafe $firstRunPath "shownfirstrunoptin" 1
+    foreach ($ver in @("16.0")) {
+        $movieFirstRunPath = "HKCU:\Software\Microsoft\Office\$ver\FirstRun"
+        if (-not (Test-Path $movieFirstRunPath)) { New-Item -Path $movieFirstRunPath -Force | Out-Null }
+        Set-RegValueSafe $movieFirstRunPath "disablemovie" 1
+    }
+
+    # 👉 Inline text prediction in Outlook mail - best-effort (newer feature, policy name may shift between builds)
+    $outlookPrefsPath = "$officeRoot\outlook\preferences"
+    if (-not (Test-Path $outlookPrefsPath)) { New-Item -Path $outlookPrefsPath -Force | Out-Null }
+    Set-RegValueSafe $outlookPrefsPath "disabletextpredictionfeature" 1
+
+    # 👉 Minimum diagnostic data level ("Neither") + AI training opt-out
+    $officePrivacyPath = "$officeRoot\common\privacy"
+    if (-not (Test-Path $officePrivacyPath)) { New-Item -Path $officePrivacyPath -Force | Out-Null }
+    Set-RegValueSafe $officePrivacyPath "diagnosticdatatypepreference" "NeitherDiagnosticData" "String"
+    $officeAiTrainingPath = "HKLM:\SOFTWARE\Policies\Microsoft\office\16.0\common\ai\training\general"
+    if (-not (Test-Path $officeAiTrainingPath)) { New-Item -Path $officeAiTrainingPath -Force | Out-Null }
+    Set-RegValueSafe $officeAiTrainingPath "disabletraining" 1
+
+    Write-Host "[+] Office telemetry, CEIP, feedback, and first-run nags disabled." -ForegroundColor Green
 }
 
 # ---------------- SECTION 11: DEFENDER ENABLE + UPDATE ----------------
 function Enable-DefenderAndUpdate {
     Write-Host "`n[*] Enabling Windows Defender and updating signatures..." -ForegroundColor Cyan
 
-    # 👉 Defender module doesn't exist on Windows 7 - skip cleanly
     if (-not (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
         Write-Host "  Skipped - Windows Defender module not available on this Windows version." -ForegroundColor Yellow
         return
@@ -985,6 +1273,11 @@ function Enable-DefenderAndUpdate {
     catch { Write-Host "  Could not toggle real-time protection." -ForegroundColor Yellow }
     try { Update-MpSignature -ErrorAction Stop; Write-Host "  Defender signatures updated." -ForegroundColor DarkGray }
     catch { Write-Host "  Signature update failed: $($_.Exception.Message)" -ForegroundColor Yellow }
+
+    $exclusionPath = Join-Path $env:LOCALAPPDATA "MRGARGSIRTools"
+    try { Add-MpPreference -ExclusionPath $exclusionPath -ErrorAction Stop; Write-Host "  Exclusion path added: $exclusionPath" -ForegroundColor DarkGray }
+    catch { Write-Host "  Could not add exclusion path: $($_.Exception.Message)" -ForegroundColor Yellow }
+
     Write-Host "[+] Defender check complete." -ForegroundColor Green
 }
 
@@ -1288,6 +1581,12 @@ function Disable-CortanaWebSearch {
     $windowsSearchPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search"
     Set-ItemProperty -Path $windowsSearchPath -Name "BingSearchEnabled" -Value 0 -Type DWord -Force
     Set-ItemProperty -Path $windowsSearchPath -Name "CortanaConsent" -Value 0 -Type DWord -Force
+
+    # 👉 NEW - Cortana above the lock screen (legacy key, harmless no-op on builds where Cortana is already gone)
+    $searchPolicyMachine = "HKLM:\Software\Policies\Microsoft\Windows\Windows Search"
+    if (-not (Test-Path $searchPolicyMachine)) { New-Item -Path $searchPolicyMachine -Force | Out-Null }
+    Set-RegValueSafe $searchPolicyMachine "AllowCortanaAboveLock" 0
+
     Write-Host "[+] Web search results disabled in Start menu." -ForegroundColor Green
 }
 
@@ -1344,12 +1643,7 @@ function Set-NetworkOptimizations {
     Set-ItemProperty -Path $gpPath -Name "GpNetworkStartTimeoutPolicyValue" -Value 0 -Type DWord -Force
     Write-Host "NLA/GP network wait timeout disabled." -ForegroundColor DarkGray
 
-    # 2. Set DNS to Cloudflare (primary) + Google (secondary) on active adapters
-    $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
-    foreach ($adapter in $adapters) {
-        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses ("1.1.1.1", "8.8.8.8") -ErrorAction SilentlyContinue
-        Write-Host "DNS set to Cloudflare/Google on $($adapter.Name)." -ForegroundColor DarkGray
-    }
+    # 2. only flush dns
     ipconfig /flushdns | Out-Null
 
     # 3. Disable IPv6 if not needed (unbind, don't fully strip stack)
@@ -1489,7 +1783,7 @@ function Show-MasterMenu {
         "Enable Classic Right-Click Context Menu"                                    = @{ Fn = "Enable-ClassicContextMenu"; Checked = $true }
         "Disable Lock Screen Ads / Tips"                                             = @{ Fn = "Disable-LockScreenAdsAndTips"; Checked = $true }
         "Enable Dark Mode"                                                           = @{ Fn = "Enable-DarkMode"; Checked = $false }
-        "Disable Cortana Web Search Results in Start Menu"                           = @{ Fn = "Disable-CortanaWebSearch"; Checked = $false }
+        "Disable Cortana Web Search Results in Start Menu"                           = @{ Fn = "Disable-CortanaWebSearch"; Checked = $true }
         "Performance-Focused Visual Effects"                                         = @{ Fn = "Set-PerformanceVisuals"; Checked = $false }
         "Repair Print Spooler & Font Cache"                                          = @{ Fn = "Repair-PrintAndFontCache"; Checked = $true }
         "Network Optimizations (NLA delay, DNS, IPv6)"                               = @{ Fn = "Set-NetworkOptimizations"; Checked = $true }
@@ -1500,6 +1794,8 @@ function Show-MasterMenu {
         "Uninstall Software (opens selection window)"                                = @{ Fn = "Show-InstalledSoftware"; Checked = $true }
         "Remove OEM Bloat (Dell/HP/Lenovo)"                                          = @{ Fn = "Remove-OEMBloat"; Checked = $true }
         "Disable Windows Recall"                                                     = @{ Fn = "Disable-Recall"; Checked = $true }
+        "Lock Down Per-App Privacy Permissions (location, motion, diagnostics, AI)"  = @{ Fn = "Disable-AppPrivacyPermissions"; Checked = $true }
+        "Disable Microsoft Office Telemetry and Feedback"                            = @{ Fn = "Disable-OfficeTelemetry"; Checked = $true }
         "Check for Multiple Antivirus (warning prompt)"                              = @{ Fn = "Test-MultipleAntivirus"; Checked = $true }
         "Enable Defender + Update Signatures"                                        = @{ Fn = "Enable-DefenderAndUpdate"; Checked = $true }
         "Disable Startup Items (AnyDesk, Bluestacks, Chrome, Spotify, etc.)"         = @{ Fn = "Disable-StartupItems"; Checked = $true }
@@ -1634,164 +1930,4 @@ function Show-MasterMenu {
 # ============================================================
 Show-MasterMenu
 
-# SIG # Begin signature block
-# MIIdowYJKoZIhvcNAQcCoIIdlDCCHZACAQExDzANBglghkgBZQMEAgEFADB5Bgor
-# BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBgUgVRaByEF3xF
-# 9bb8RKgfyLjc604sLEi1w2vCPPWBBKCCA0owggNGMIICLqADAgECAhBtjPBz9YE3
-# vEvSL6JQoHDmMA0GCSqGSIb3DQEBCwUAMDsxCzAJBgNVBAYTAklOMRgwFgYDVQQK
-# DA9NUkdBUkdTSVIgVG9vbHMxEjAQBgNVBAMMCU1SR0FSR1NJUjAeFw0yNjA4MTEw
-# OTA4MjlaFw0zMTA4MTEwOTE4MjlaMDsxCzAJBgNVBAYTAklOMRgwFgYDVQQKDA9N
-# UkdBUkdTSVIgVG9vbHMxEjAQBgNVBAMMCU1SR0FSR1NJUjCCASIwDQYJKoZIhvcN
-# AQEBBQADggEPADCCAQoCggEBANX4w/Ag/3jhcl82Yn3ovncu/YdC3RwsiKQ8dwfU
-# QJpzbOYuP07QDfg5sfrOMuCtuKa2ff53e1v0j8EY99vSVwIFPup9XeX1Sp/ZS1II
-# LrfGnlKftRHNJycHjCiCBiAAdFF0ac1qPX49t3NFfeU/6+QTiuge/LgYaYQRziFV
-# NpOwykDkD4s8dhDYvf+qBxRSIY7lRkv2vR50yqbuuX/w73p245Gda8hjjLDRfAHn
-# bHXA7maY5VrFhxudulvOd0XGxG2uaCTb4faFquaHq+Jxeu0Dn2Sj0x6ABKW3uMVW
-# DxeYBt9A83DzASW0s4ZhgZYF0IFU69xuIoOK8B2baUQknXECAwEAAaNGMEQwDgYD
-# VR0PAQH/BAQDAgeAMBMGA1UdJQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBROay6l
-# yfA9rbdqUHdEwzQ5PgLvETANBgkqhkiG9w0BAQsFAAOCAQEA0PI13lekdOIIxiex
-# fBkLv7SsyysiV2M+20xu0k2JQayfEHD3xymtyOMFAuyftl4SI9DOPhp3/kFaJMmb
-# iRLYhYUIbyR1Sljw5E8y2MsaiOfRAihNKQoItF9YFpMYWs5rzVqNZd5lychGvkmR
-# QI6Ng7YcZt6Bfgan+rk3jiZjLx6OSChAmkE1dob7HnGvPziEQOy0+TDPDicnmdH8
-# OWIRP9nVLKfkY5MnGFpW6erFBaMKiNN2xr2NypgB8fb3m2tMC/dXShciRnr2qv/h
-# bekXzzx/Mz8No05vsEGXGYXOHeAzwR1LOOnOE6qUpGMpVnhuRwlSf3ITnSLYKq28
-# lW/NkDGCGa8wghmrAgEBME8wOzELMAkGA1UEBhMCSU4xGDAWBgNVBAoMD01SR0FS
-# R1NJUiBUb29sczESMBAGA1UEAwwJTVJHQVJHU0lSAhBtjPBz9YE3vEvSL6JQoHDm
-# MA0GCWCGSAFlAwQCAQUAoIG4MBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwG
-# CisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBAYjCv
-# TY0QHvrQt3zuffLYa3IZdSk0O7sRpy+VNfYjxjBMBgorBgEEAYI3AgEMMT4wPKA6
-# gDgAVwBpAG4AZABvAHcAcwAgAFUAdABpAGwAaQB0AHkAIABiAHkAIABtAHIAZwBh
-# AHIAZwBzAGkAcjANBgkqhkiG9w0BAQEFAASCAQAsuYSFeBLLlccNB28sstfVGp2W
-# 0Hd/z+SsfSHWk6j4kK1OEfw+/3FbEpRe/pQJy3BtU1OclKxlMpi7Eds7MXf5fc3x
-# jYELlOjFdfeVLMxdxWhlQg6QU65eDjBJu1IUdF/UrvWuFwa3Wl+7d1QkjGnPR/ZW
-# IjsYxSHlDWvJhri5+nCNtRmM3vaUW+7sm6N2z8A+yZVzkf/Ce2TFsf4VIglmvlm9
-# qb1w7wwYsYABK/X5+DVJJLT10Uqx1T2B6YKRyK+Y3i17/SKJZmFbyPZehW25AQb5
-# tsIsGQy2i1VATGyAiJI7Cs9nQafxH0htniIlxr5OfHfP21K77agOO3OEt6VAoYIX
-# djCCF3IGCisGAQQBgjcDAwExghdiMIIXXgYJKoZIhvcNAQcCoIIXTzCCF0sCAQMx
-# DzANBglghkgBZQMEAgEFADB3BgsqhkiG9w0BCRABBKBoBGYwZAIBAQYJYIZIAYb9
-# bAcBMDEwDQYJYIZIAWUDBAIBBQAEID0cHskTjyviAC+ebrNmYg0r8xEEXTE+r0pP
-# cuu2UNT/AhBKFmybn3kIUFEDCA+zO5nGGA8yMDI2MDgxMzA0NDUyN1qgghM6MIIG
-# 7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDANBgkqhkiG9w0BAQsFADBpMQsw
-# CQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERp
-# Z2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIw
-# MjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkwMzIzNTk1OVowYzELMAkGA1UE
-# BhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQDEzJEaWdpQ2Vy
-# dCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVzcG9uZGVyIDIwMjUgMTCCAiIw
-# DQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBGrC0Sxp7Q6q5gVrMrV7pvUf+G
-# cAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwBSOeLpvPnZ8ZN+vo8dE2/pPvO
-# x/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/4QhguSssp3qome7MrxVyfQO9
-# sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3K3E0zz09ldQ//nBZZREr4h/G
-# I6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROUINDT98oksouTMYFOnHoRh6+8
-# 6Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3w6ySSSu+3qU8DD+nigNJFmt6
-# LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46YceNA0LfNsnqcnpJeItK/DhKbPx
-# TTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d2sC26/PQPdP51ho1zBp+xUIZ
-# kpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8xymLnjCbSLZ49kPmk8iyyizND
-# IXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+AliL7ojTdS5PWPsWeupWs7Np
-# ChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2bQhpp0IoKRR7YufAkprxMiXAJ
-# Q1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNVHRMBAf8EAjAAMB0GA1UdDgQW
-# BBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSMEGDAWgBTvb1NK6eQGfHrK4pBW
-# 9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAwwCgYIKwYBBQUHAwgw
-# gZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdp
-# Y2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNv
-# bS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVTdGFtcGluZ1JTQTQwOTZTSEEyNTYyMDI1
-# Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRwOi8vY3JsMy5kaWdpY2VydC5j
-# b20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBpbmdSU0E0MDk2U0hBMjU2MjAy
-# NUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIwCwYJYIZIAYb9bAcBMA0GCSqG
-# SIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESeY0ByIfjk9iJP2zWLpQq1b4UR
-# GnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FUFqNh+tshgb4O6Lgjg8K8elC4
-# +oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7YMTmqPO9mzskgiC3QYIUP2S3H
-# QvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0ziTN6R3ygQBHMUBaB5bdrPbF6M
-# RYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/QqvXnNb+YkDFkxUGtMTaiLR9
-# wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlqAcuEVT0cKsb+zJNEsuEB7O7/
-# cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3Y50OHgaY7T/lwd6UArb+BOVA
-# kg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roancJIFcbojBcxlRcGG0LIhp6Gv
-# ReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/ndUlQ05oxYy2zRWVFjF7mcr4
-# C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7IRE2lskKPIJgbaP5t2nGj/UL
-# Li49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdCvHlshtjdNXOCIUjsarfNZzCC
-# BrQwggScoAMCAQICEA3HrFcF/yGZLkBDIgw6SYYwDQYJKoZIhvcNAQELBQAwYjEL
-# MAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3
-# LmRpZ2ljZXJ0LmNvbTEhMB8GA1UEAxMYRGlnaUNlcnQgVHJ1c3RlZCBSb290IEc0
-# MB4XDTI1MDUwNzAwMDAwMFoXDTM4MDExNDIzNTk1OVowaTELMAkGA1UEBhMCVVMx
-# FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVz
-# dGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMTCCAiIw
-# DQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALR4MdMKmEFyvjxGwBysddujRmh0
-# tFEXnU2tjQ2UtZmWgyxU7UNqEY81FzJsQqr5G7A6c+Gh/qm8Xi4aPCOo2N8S9SLr
-# C6Kbltqn7SWCWgzbNfiR+2fkHUiljNOqnIVD/gG3SYDEAd4dg2dDGpeZGKe+42DF
-# UF0mR/vtLa4+gKPsYfwEu7EEbkC9+0F2w4QJLVSTEG8yAR2CQWIM1iI5PHg62IVw
-# xKSpO0XaF9DPfNBKS7Zazch8NF5vp7eaZ2CVNxpqumzTCNSOxm+SAWSuIr21Qomb
-# +zzQWKhxKTVVgtmUPAW35xUUFREmDrMxSNlr/NsJyUXzdtFUUt4aS4CEeIY8y9Ia
-# aGBpPNXKFifinT7zL2gdFpBP9qh8SdLnEut/GcalNeJQ55IuwnKCgs+nrpuQNfVm
-# UB5KlCX3ZA4x5HHKS+rqBvKWxdCyQEEGcbLe1b8Aw4wJkhU1JrPsFfxW1gaou30y
-# Z46t4Y9F20HHfIY4/6vHespYMQmUiote8ladjS/nJ0+k6MvqzfpzPDOy5y6gqzti
-# T96Fv/9bH7mQyogxG9QEPHrPV6/7umw052AkyiLA6tQbZl1KhBtTasySkuJDpsZG
-# Kdlsjg4u70EwgWbVRSX1Wd4+zoFpp4Ra+MlKM2baoD6x0VR4RjSpWM8o5a6D8bpf
-# m4CLKczsG7ZrIGNTAgMBAAGjggFdMIIBWTASBgNVHRMBAf8ECDAGAQH/AgEAMB0G
-# A1UdDgQWBBTvb1NK6eQGfHrK4pBW9i/USezLTjAfBgNVHSMEGDAWgBTs1+OC0nFd
-# ZEzfLmc/57qYrhwPTzAOBgNVHQ8BAf8EBAMCAYYwEwYDVR0lBAwwCgYIKwYBBQUH
-# AwgwdwYIKwYBBQUHAQEEazBpMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdp
-# Y2VydC5jb20wQQYIKwYBBQUHMAKGNWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNv
-# bS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3J0MEMGA1UdHwQ8MDowOKA2oDSGMmh0
-# dHA6Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRSb290RzQuY3Js
-# MCAGA1UdIAQZMBcwCAYGZ4EMAQQCMAsGCWCGSAGG/WwHATANBgkqhkiG9w0BAQsF
-# AAOCAgEAF877FoAc/gc9EXZxML2+C8i1NKZ/zdCHxYgaMH9Pw5tcBnPw6O6FTGNp
-# oV2V4wzSUGvI9NAzaoQk97frPBtIj+ZLzdp+yXdhOP4hCFATuNT+ReOPK0mCefSG
-# +tXqGpYZ3essBS3q8nL2UwM+NMvEuBd/2vmdYxDCvwzJv2sRUoKEfJ+nN57mQfQX
-# wcAEGCvRR2qKtntujB71WPYAgwPyWLKu6RnaID/B0ba2H3LUiwDRAXx1Neq9ydOa
-# l95CHfmTnM4I+ZI2rVQfjXQA1WSjjf4J2a7jLzWGNqNX+DF0SQzHU0pTi4dBwp9n
-# EC8EAqoxW6q17r0z0noDjs6+BFo+z7bKSBwZXTRNivYuve3L2oiKNqetRHdqfMTC
-# W/NmKLJ9M+MtucVGyOxiDf06VXxyKkOirv6o02OoXN4bFzK0vlNMsvhlqgF2puE6
-# FndlENSmE+9JGYxOGLS/D284NHNboDGcmWXfwXRy4kbu4QFhOm0xJuF2EZAOk5eC
-# khSxZON3rGlHqhpB/8MluDezooIs8CVnrpHMiD2wL40mm53+/j7tFaxYKIqL0Q4s
-# sd8xHZnIn/7GELH3IdvG2XlM9q7WP/UwgOkw/HQtyRN62JK4S1C8uw3PdBunvAZa
-# psiI5YKdvlarEvf8EA+8hcpSM9LHJmyrxaFtoza2zNaQ9k+5t1wwggWNMIIEdaAD
-# AgECAhAOmxiO+dAt5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYT
-# AlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2Vy
-# dC5jb20xJDAiBgNVBAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0y
-# MjA4MDEwMDAwMDBaFw0zMTExMDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUwEwYD
-# VQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAf
-# BgNVBAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcNAQEB
-# BQADggIPADCCAgoCggIBAL/mkHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC4Smn
-# PVirdprNrnsbhA3EMB/zG6Q4FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWlfr6f
-# qVcWWVVyr2iTcMKyunWZanMylNEQRBAu34LzB4TmdDttceItDBvuINXJIB1jKS3O
-# 7F5OyJP4IWGbNOsFxl7sWxq868nPzaw0QF+xembud8hIqGZXV59UWI4MK7dPpzDZ
-# Vu7Ke13jrclPXuU15zHL2pNe3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3pC4F
-# fYj1gj4QkXCrVYJBMtfbBHMqbpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJpMLm
-# qaBn3aQnvKFPObURWBf3JFxGj2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aadMre
-# Sx7nDmOu5tTvkpI6nj3cAORFJYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXDj/ch
-# srIRt7t/8tWMcCxBYKqxYxhElRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB4Q+U
-# DCEdslQpJYls5Q5SUUd0viastkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ33xM
-# dT9j7CFfxCBRa2+xq4aLT8LWRV+dIPyhHsXAj6KxfgommfXkaS+YHS312amyHeUb
-# AgMBAAGjggE6MIIBNjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC0nFd
-# ZEzfLmc/57qYrhwPTzAfBgNVHSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzAO
-# BgNVHQ8BAf8EBAMCAYYweQYIKwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhhodHRw
-# Oi8vb2NzcC5kaWdpY2VydC5jb20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNlcnRz
-# LmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYDVR0f
-# BD4wPDA6oDigNoY0aHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNz
-# dXJlZElEUm9vdENBLmNybDARBgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcNAQEM
-# BQADggEBAHCgv0NcVec4X6CjdBs9thbX979XB72arKGHLOyFXqkauyL4hxppVCLt
-# pIh3bb0aFPQTSnovLbc47/T/gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6mouy
-# XtTP0UNEm0Mh65ZyoUi0mcudT6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPHh6jS
-# TEAZNUZqaVSwuKFWjuyk1T3osdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCNNWAc
-# AgPLILCsWKAOQGPFmCLBsln1VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg62fC2
-# h5b9W9FcrBjDTZ9ztwGpn1eqXijiuZQxggN8MIIDeAIBATB9MGkxCzAJBgNVBAYT
-# AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
-# VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
-# EAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCggdEwGgYJKoZIhvcNAQkD
-# MQ0GCyqGSIb3DQEJEAEEMBwGCSqGSIb3DQEJBTEPFw0yNjA4MTMwNDQ1MjdaMCsG
-# CyqGSIb3DQEJEAIMMRwwGjAYMBYEFN1iMKyGCi0wa9o4sWh5UjAH+0F+MC8GCSqG
-# SIb3DQEJBDEiBCAbaQBEHmzk/T83ak5ClzTqyO15zwm0iDltoUpp0LzKjjA3Bgsq
-# hkiG9w0BCRACLzEoMCYwJDAiBCBKoD+iLNdchMVck4+CjmdrnK7Ksz/jbSaaozTx
-# RhEKMzANBgkqhkiG9w0BAQEFAASCAgBo0hVkazJK4ncCyuElpaD2YRpdt34iPJAg
-# YThShMug+UGIr/LU9kCDiz8Uv5BnVOaYswwwNSsq+xumxA+6tVJUiucTJtlO3FMr
-# zp4CUbAKeCLQv8JGekSi0+YAZ6CcY1/49yLoOSLhRFLtzApBNusCAPBgzli/2Uyd
-# 9LiIc3u13pLVJzJr29ABFU7ks+zDr5Vd8yMcXFW/6CYhK+nqJEWgp2BZizJMbqvx
-# B+0QLYG5JhtDLOiGPuAb253oHanfMtT50JT1dkaWu8lPC0ly4C4rICXaExJsEmG3
-# 34eUK8hyuUC7+AQWLexZ4smUMo3NzKSo37D8SULHxAerAZaZrz6Q7LrEyNtdKkf5
-# UWZZUmGjzje8ZeSi+G2fuPblE4zypQRM2AYyubNxmpcnw2ZKxAbCAEOOLbMUdoxG
-# dF4jKait9Go0BiByEQpOnjCmw5InC+mSwQ5edLMZ9aBWyZUHC3puysrRjMI89aX7
-# fHIuclZkYmmRX3qT5ctfEWeJl6ivIhCnvndzDOaE0KeJEUSBpdp3QU8dUuQetfuA
-# Zzc4jEtKOr92tdgITuTBX1qwwSfMin6jthC0caGW6XXWLUI5txa77aGIZNL8JJWZ
-# /1doog0WaPrWfMwN7/7hsqVkP/L/IHZ6bRz2Hojj8jIIqWLa2uzmRdqeVkZxcfMu
-# Jn/UqDao2g==
-# SIG # End signature block
+
